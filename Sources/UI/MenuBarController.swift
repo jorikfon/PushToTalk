@@ -8,6 +8,7 @@ public class MenuBarController: ObservableObject {
     private var popover: NSPopover?
 
     @Published public var isRecording = false
+    @Published public var isProcessing = false
     @Published public var modelSize: String = "tiny"
 
     public init() {
@@ -26,10 +27,10 @@ public class MenuBarController: ObservableObject {
 
         // Создаем popover для настроек
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 300, height: 250)
+        popover?.contentSize = NSSize(width: 500, height: 600)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(
-            rootView: SettingsView(controller: self)
+            rootView: EnhancedSettingsView(controller: self)
         )
 
         print("MenuBarController: ✓ Menu bar настроен")
@@ -58,26 +59,48 @@ public class MenuBarController: ObservableObject {
             if let button = self.statusItem?.button {
                 // Меняем иконку в зависимости от состояния
                 let iconName = recording ? "mic.fill" : "mic"
+                let iconColor: NSColor = recording ? .systemRed : .labelColor
+
                 button.image = NSImage(
                     systemSymbolName: iconName,
                     accessibilityDescription: recording ? "Recording" : "PushToTalk"
                 )
 
-                // Анимация при записи
-                if recording {
-                    NSAnimationContext.runAnimationGroup { context in
-                        context.duration = 0.3
-                        button.animator().alphaValue = 0.5
-                    } completionHandler: {
-                        NSAnimationContext.runAnimationGroup { context in
-                            context.duration = 0.3
-                            button.animator().alphaValue = 1.0
-                        }
-                    }
+                // Окрашиваем иконку
+                button.image?.isTemplate = true
+                button.contentTintColor = iconColor
+
+                // Убедимся что alpha всегда 1.0 (без пульсации)
+                button.alphaValue = 1.0
+            }
+        }
+    }
+
+    /// Обновление иконки для состояния обработки
+    public func updateProcessingState(_ processing: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            self.isProcessing = processing
+
+            if let button = self.statusItem?.button {
+                if processing {
+                    // Иконка обработки (синий цвет, без анимации)
+                    button.image = NSImage(
+                        systemSymbolName: "waveform.circle.fill",
+                        accessibilityDescription: "Processing"
+                    )
+                    button.image?.isTemplate = true
+                    button.contentTintColor = .systemBlue
+                    button.alphaValue = 1.0
+                } else {
+                    // Возвращаем обычную иконку
+                    self.updateIcon(recording: false)
                 }
             }
         }
     }
+
 
     /// Показ ошибки пользователю
     public func showError(_ message: String) {

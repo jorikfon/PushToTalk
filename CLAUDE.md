@@ -4,120 +4,184 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**PushToTalk** is a lightweight voice-to-text application optimized for Apple Silicon (M1/M2/M3). It uses the F16 key as a push-to-talk trigger and automatically inserts recognized speech at the current cursor position.
+**PushToTalk** is a lightweight voice-to-text application optimized for Apple Silicon (M1/M2/M3). It uses customizable hotkeys (default: F16) as a push-to-talk trigger and automatically inserts recognized speech at the current cursor position.
 
-The project provides three implementation variants:
-- **Native**: Uses macOS native Speech Framework (lightweight, no AI models)
-- **Whisper**: Uses OpenAI's Whisper for accurate speech recognition
-- **Core ML**: Uses Core ML format on Apple Neural Engine (zero CPU idle, M1-optimized)
+The application is built with **Swift** and uses **WhisperKit** for on-device speech recognition with Metal GPU acceleration.
 
 ## Architecture
 
-### Core Components
+### Core Services
 
-**CoreMLPushToTalk class** (`push_to_talk_coreml.py:22-262`)
-- Main application class managing the lifecycle and state
-- Key responsibilities:
-  - Audio capture and buffering via `sounddevice` library
-  - Model loading/conversion to Core ML format
-  - Keyboard listener for F16 press/release events
-  - Text insertion at cursor via clipboard manipulation
+#### 1. KeyboardMonitor (`Sources/Services/KeyboardMonitor.swift`)
+- **Technology**: Carbon Event Manager API (`RegisterEventHotKey`)
+- **Advantage**: Does NOT require Accessibility permissions for function keys (F13-F19)
+- **Features**:
+  - Supports F13-F19 and modifier keys (Right Cmd/Option/Control)
+  - Automatic hotkey re-registration when user changes preference
+  - Global event monitoring without Input Monitoring permissions
+- **Key Methods**:
+  - `startMonitoring()` - Registers global hotkey with Carbon Event Manager
+  - `handleCarbonEvent()` - Processes kEventHotKeyPressed/Released events
+  - `restartMonitoring()` - Re-registers hotkey when changed
 
-**Key Methods:**
-- `load_coreml_model()` - Loads or converts Whisper model to Core ML format (cached in `/tmp`)
-- `start_recording()` - Initializes audio stream and background processing thread
-- `_process_audio_queue()` - Background worker thread that buffers audio chunks
-- `stop_recording_and_transcribe()` - Stops recording, runs inference on Neural Engine, inserts text
-- `insert_text_at_cursor()` - Uses clipboard to paste text and `pynput` keyboard control
+#### 2. AudioCaptureService (`Sources/Services/AudioCaptureService.swift`)
+- Audio capture using AVAudioEngine
+- Real-time format conversion: native microphone format → 16kHz mono Float32
+- Buffer management with thread-safe locking
+- **Key Methods**:
+  - `startRecording()` - Starts AVAudioEngine with format conversion pipeline
+  - `stopRecording()` - Returns captured audio samples
+  - `processAudioBuffer()` - Converts and buffers audio chunks
 
-### Dependencies
+#### 3. WhisperService (`Sources/Services/WhisperService.swift`)
+- WhisperKit integration for on-device transcription
+- Metal GPU acceleration through MLX backend
+- Performance metrics (Real-Time Factor, transcription speed)
+- **Key Methods**:
+  - `loadModel()` - Downloads and initializes WhisperKit model
+  - `transcribe()` - Transcribes audio samples to text
+  - `verifyMetalAcceleration()` - Checks Metal GPU availability
 
-**Core libraries:**
-- `sounddevice` - Audio input capture with callback-based architecture
-- `coremltools` - Convert PyTorch models to Core ML format
-- `transformers` - Whisper model and processor from HuggingFace
-- `torch` - PyTorch runtime for model conversion
-- `pynput` - Cross-platform keyboard/mouse control
-- `pyperclip` - Clipboard access for text insertion
+#### 4. HotkeyManager (`Sources/Utils/HotkeyManager.swift`)
+- Centralized hotkey configuration management
+- Persists user hotkey preference to UserDefaults
+- Notifies KeyboardMonitor when hotkey changes
+- Supported keys: F13-F19, Right Command/Option/Control
 
-**Model details:**
-- Uses `WhisperForConditionalGeneration` from OpenAI
-- Mel spectrogram input: shape (1, 80, 3000)
-- Currently defaults to 'tiny' model for M1 efficiency
-- Models are converted to Core ML on first run and cached in `/tmp`
+### System Logging
 
-### Audio Pipeline
+**LogManager** (`Sources/Utils/LogManager.swift`)
+- Unified logging system using Apple's OSLog framework
+- Categories: `app`, `keyboard`, `audio`, `transcription`, `permissions`
+- Subsystem: `com.pushtotalk.app`
+- **Viewing logs**:
+```bash
+# Real-time log stream
+log stream --predicate 'subsystem == "com.pushtotalk.app"'
 
-1. `start_recording()` creates an audio stream with 512 sample buffer (low latency)
-2. Samples are fed to `audio_callback()` which enqueues chunks into `audio_queue`
-3. Background thread `_process_audio_queue()` pulls chunks and concatenates them
-4. On F16 release, audio is flattened and processed:
-   - Mel spectrogram computed by Whisper processor
-   - Inference run on Neural Engine via Core ML
-   - Output tokens decoded back to text
-   - Text inserted via clipboard + Cmd+V
+# Filter by category
+log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "keyboard"'
 
-### macOS Integration
+# Show last hour
+log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h
+```
 
-- **F16 key detection**: Uses `pynput.keyboard.Listener` with vk=127 (F16 keycode)
-- **Text insertion**: Copies text to clipboard, presses Cmd+V via `pynput` controller
-- **Audio feedback**: Uses `afplay` for sound effects (`Pop.aiff`, `Glass.aiff`, `Basso.aiff`)
-- **Fallback**: macOS dictation via AppleScript if Core ML inference fails
-- **Process optimization**: Runs on efficiency cores via `taskpolicy` background mode
+### Permissions
+
+**Required**:
+- ✅ Microphone access (AVFoundation) - for audio recording
+
+**NOT Required** (thanks to Carbon API):
+- ❌ Accessibility - not needed for F-key hotkeys
+- ❌ Input Monitoring - not needed for Carbon RegisterEventHotKey
+
+**PermissionManager** (`Sources/Utils/PermissionManager.swift`)
+- Simplified permission checker (microphone only)
+- Async permission request with user feedback
 
 ## Development Tasks
 
-### Setup for Development
+### Building the Application
 
 ```bash
-# Run setup wizard (interactive)
-bash setup_m1.sh
+# Build the application
+swift build
 
-# Manual dependency installation for Core ML variant
-pip3 install coremltools sounddevice transformers torch soundfile pyperclip pynput numpy
+# Run the main executable
+.build/debug/PushToTalkSwift
+
+# Build release version
+swift build -c release
 ```
 
-### Running the Application
+### Running Tests
 
 ```bash
-# Run Core ML variant (M1-optimized)
-python3 push_to_talk_coreml.py
+# Run all tests
+swift test
 
-# Controls:
-# F16: Hold to record, release to transcribe and insert
-# ESC: Exit application
+# Run specific test executables
+.build/debug/AudioCaptureTest
+.build/debug/TranscribeTest
+.build/debug/KeyboardMonitorTest
 ```
 
-### Testing
+### Building .app Bundle
 
-The setup script includes an interactive test (`test_setup()` in `setup_m1.sh`) that validates:
-- Python package imports
-- Microphone device availability
-- Clipboard access
-- F16 key detection
-
-Run manually:
 ```bash
-bash setup_m1.sh  # Select option to run tests
+# Build signed .app with entitlements
+./build_app.sh
 ```
 
 ## Common Issues & Debugging
 
-**Model Loading**: First run converts Whisper model to Core ML format (large download, one-time only). Cached in `/tmp/whisper_tiny.mlmodel`.
+### Hotkeys Not Working
 
-**Missing Permissions**: The script requires:
-1. **Accessibility** permission for keyboard control
-2. **Microphone** permission for audio input
-3. **Input Monitoring** permission for F16 key detection
+**Problem**: Global hotkeys don't trigger recording
 
-Grant via System Settings > Privacy & Security.
+**Solutions**:
+1. Check logs in Console.app:
+   ```bash
+   log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "keyboard"'
+   ```
+2. Carbon API does NOT require Accessibility permissions for F13-F19
+3. If using modifier keys (Cmd/Option/Control), ensure they're not conflicting with system shortcuts
+4. Verify hotkey registration in logs: look for "RegisterEventHotKey success"
 
-**Inference Failures**: If Core ML prediction fails, the application falls back to macOS native dictation via AppleScript.
+### Missing Microphone Permission
+
+**Problem**: Recording fails with permission error
+
+**Solution**:
+1. Open **System Settings** → **Privacy & Security** → **Microphone**
+2. Enable **PushToTalk** in the list
+3. Restart application
+
+### Model Loading Fails
+
+**Problem**: WhisperKit model download fails
+
+**Solutions**:
+1. Check internet connection (models downloaded from Hugging Face)
+2. Verify Metal GPU availability:
+   ```bash
+   log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "transcription"'
+   ```
+3. Clear WhisperKit cache: `~/Library/Caches/whisperkit_models/`
+
+### Viewing Application Logs
+
+**Real-time monitoring**:
+```bash
+# All logs
+log stream --predicate 'subsystem == "com.pushtotalk.app"' --level debug
+
+# Only errors
+log stream --predicate 'subsystem == "com.pushtotalk.app" && eventType >= logEventType.error'
+```
+
+**Historical logs**:
+```bash
+# Last 30 minutes
+log show --predicate 'subsystem == "com.pushtotalk.app"' --last 30m
+
+# Export to file
+log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h > logs.txt
+```
 
 ## Key Design Principles
 
-1. **Zero idle CPU**: Neural Engine handles inference, main process sleeps until F16 pressed
-2. **Minimal latency**: 512-sample buffer, background thread for audio processing
-3. **Clipboard safety**: Original clipboard contents restored after 300ms delay
-4. **Audio feedback**: System sounds (Pop, Glass, Basso) for user feedback
-5. **M1 optimization**: Process priority set to efficiency cores, QoS background
+1. **Carbon API for Hotkeys**: More reliable than CGEventTap, no Accessibility permissions required
+2. **Unified Logging**: All logs accessible through Console.app with proper categorization
+3. **On-device Processing**: WhisperKit runs entirely on device with Metal GPU acceleration
+4. **Minimal Permissions**: Only microphone access required, no Accessibility/Input Monitoring
+5. **Performance Monitoring**: Real-Time Factor (RTF) tracking for transcription speed
+6. **Menu Bar Only**: Runs as accessory app without Dock icon
+
+## Code References
+
+- Hotkey registration: `Sources/Services/KeyboardMonitor.swift:113`
+- Carbon event handling: `Sources/Services/KeyboardMonitor.swift:168`
+- Audio recording start: `Sources/Services/AudioCaptureService.swift:41`
+- Transcription: `Sources/Services/WhisperService.swift:62`
+- Log viewer instructions: `Sources/Utils/LogManager.swift:69`

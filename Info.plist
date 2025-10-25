@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Basic Info -->
+    <key>CFBundleName</key>
+    <string>PushToTalk</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>PushToTalk</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.pushtotalk.app</string>
+
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleExecutable</key>
+    <string>PushToTalkSwift</string>
+
+    <!-- macOS Version Requirements -->
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+
+    <!-- UI Configuration -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- Privacy Permissions -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>PushToTalk needs microphone access to capture your voice for transcription.</string>
+
+    <key>NSAppleEventsUsageDescription</key>
+    <string>PushToTalk needs to send keyboard events to insert transcribed text.</string>
+
+    <!-- App Category -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+
+    <!-- Icon File -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <!-- Copyright -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2025. All rights reserved.</string>
+
+    <!-- Supported Architectures -->
+    <key>LSArchitecturePriority</key>
+    <array>
+        <string>arm64</string>
+    </array>
+
+    <!-- Document Types (if needed) -->
+    <key>CFBundleDocumentTypes</key>
+    <array/>
+
+    <!-- URL Schemes (if needed) -->
+    <key>CFBundleURLTypes</key>
+    <array/>
+</dict>
+</plist>

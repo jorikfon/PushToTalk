@@ -22,6 +22,7 @@ let package = Package(
                 "integration_test.swift",
                 "keyboard_monitor_test.swift",
                 "text_inserter_test.swift",
+                "performance_benchmark.swift",
                 "App/PushToTalkApp.swift",
                 "App/AppDelegate.swift"
             ]
@@ -80,10 +81,21 @@ let package = Package(
             sources: ["text_inserter_test.swift"]
         ),
 
+        // Performance Benchmark
+        .executableTarget(
+            name: "PerformanceBenchmark",
+            dependencies: ["PushToTalkCore"],
+            path: "Sources",
+            sources: ["performance_benchmark.swift"]
+        ),
+
         // Unit тесты
         .testTarget(
             name: "PushToTalkSwiftTests",
-            dependencies: ["PushToTalkSwift"],
+            dependencies: [
+                "PushToTalkCore",
+                .product(name: "WhisperKit", package: "WhisperKit")
+            ],
             path: "Tests"
         )
     ]

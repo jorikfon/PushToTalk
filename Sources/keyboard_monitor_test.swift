@@ -4,9 +4,10 @@ import PushToTalkCore
 
 /// Тестовая программа для проверки KeyboardMonitor
 /// Проверяет:
-/// 1. Accessibility разрешения
-/// 2. Обнаружение нажатий F16
+/// 1. Регистрацию глобальных hotkeys через Carbon API
+/// 2. Обнаружение нажатий горячей клавиши (по умолчанию F16)
 /// 3. Обработку press/release событий
+/// Carbon API НЕ требует Accessibility разрешений для F-клавиш!
 
 class KeyboardMonitorTest {
     private let monitor = KeyboardMonitor()
@@ -16,50 +17,42 @@ class KeyboardMonitorTest {
 
     func run() throws {
         print(String(repeating: "=", count: 60))
-        print("🎹 Keyboard Monitor Test")
+        print("🎹 Keyboard Monitor Test (Carbon API)")
         print(String(repeating: "=", count: 60))
         print("")
 
-        // Шаг 1: Проверка Accessibility разрешений
-        print("1️⃣ Checking Accessibility Permissions...")
-        let hasPermissions = monitor.checkAccessibilityPermissions()
-
-        if !hasPermissions {
-            print("")
-            print("❌ Accessibility permissions NOT granted")
-            print("")
-            print("⚠️ To grant permissions:")
-            print("   1. Open System Settings > Privacy & Security > Accessibility")
-            print("   2. Enable access for Terminal or your IDE")
-            print("   3. Re-run this test")
-            print("")
-            throw TestError.accessibilityDenied
-        }
-
-        print("✅ Accessibility permissions granted")
+        // Информация о текущей горячей клавише
+        let hotkey = HotkeyManager.shared.currentHotkey
+        print("ℹ️ Current hotkey: \(hotkey.displayName)")
+        print("   Key code: \(hotkey.keyCode)")
+        print("   Technology: Carbon Event Manager (RegisterEventHotKey)")
+        print("   Permissions: ✅ NO Accessibility permissions required!")
         print("")
 
-        // Шаг 2: Настройка обработчиков событий
-        monitor.onF16Press = { [weak self] in
+        // Настройка обработчиков событий
+        monitor.onHotkeyPress = { [weak self] in
             guard let self = self else { return }
             self.pressCount += 1
             let elapsed = Date().timeIntervalSince(self.startTime)
-            print("\n🔴 F16 PRESSED (#\(self.pressCount)) at \(String(format: "%.2f", elapsed))s")
+            print("\n🔴 HOTKEY PRESSED (#\(self.pressCount)) at \(String(format: "%.2f", elapsed))s")
         }
 
-        monitor.onF16Release = { [weak self] in
+        monitor.onHotkeyRelease = { [weak self] in
             guard let self = self else { return }
             self.releaseCount += 1
             let elapsed = Date().timeIntervalSince(self.startTime)
-            print("🟢 F16 RELEASED (#\(self.releaseCount)) at \(String(format: "%.2f", elapsed))s")
+            print("🟢 HOTKEY RELEASED (#\(self.releaseCount)) at \(String(format: "%.2f", elapsed))s")
         }
 
-        // Шаг 3: Запуск мониторинга
-        print("2️⃣ Starting keyboard monitoring...")
+        // Запуск мониторинга
+        print("1️⃣ Starting keyboard monitoring...")
         let started = monitor.startMonitoring()
 
         if !started {
             print("❌ Failed to start monitoring")
+            print("")
+            print("This should not happen with Carbon API!")
+            print("Check Console logs: log stream --predicate 'subsystem == \"com.pushtotalk.app\" && category == \"keyboard\"'")
             throw TestError.monitoringFailed
         }
 
@@ -71,22 +64,22 @@ class KeyboardMonitorTest {
         print("📋 Test Instructions:")
         print(String(repeating: "=", count: 60))
         print("")
-        print("1. Press and hold F16 key (top-right on Mac keyboards)")
-        print("2. Release F16 key")
+        print("1. Press and hold \(hotkey.displayName) key")
+        print("2. Release \(hotkey.displayName) key")
         print("3. Repeat several times to test press/release detection")
         print("4. Press Ctrl+C to exit")
         print("")
         print("Expected behavior:")
-        print("  - Each F16 press should print: 🔴 F16 PRESSED")
-        print("  - Each F16 release should print: 🟢 F16 RELEASED")
-        print("  - System should NOT perform default F16 action")
+        print("  - Each press should print: 🔴 HOTKEY PRESSED")
+        print("  - Each release should print: 🟢 HOTKEY RELEASED")
+        print("  - System should NOT perform default action")
         print("")
         print(String(repeating: "=", count: 60))
-        print("⏳ Waiting for F16 events (press Ctrl+C to stop)...")
+        print("⏳ Waiting for hotkey events (press Ctrl+C to stop)...")
         print(String(repeating: "=", count: 60))
         print("")
 
-        // Шаг 4: Ожидание событий
+        // Ожидание событий
         // Запускаем RunLoop для обработки событий
         let runLoop = RunLoop.main
 
@@ -125,13 +118,12 @@ class KeyboardMonitorTest {
 }
 
 enum TestError: Error {
-    case accessibilityDenied
     case monitoringFailed
 }
 
 // MARK: - Main
 
-print("\n🚀 Starting Keyboard Monitor Test\n")
+print("\n🚀 Starting Keyboard Monitor Test (Carbon API)\n")
 
 let test = KeyboardMonitorTest()
 

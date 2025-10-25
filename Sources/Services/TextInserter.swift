@@ -7,18 +7,18 @@ public class TextInserter {
     private let pasteboard = NSPasteboard.general
 
     public init() {
-        print("TextInserter: Инициализация")
+        LogManager.app.info("TextInserter инициализирован")
     }
 
     /// Вставить текст в позицию курсора
     /// Использует временный clipboard и симуляцию Cmd+V
     public func insertTextAtCursor(_ text: String) {
         guard !text.isEmpty else {
-            print("TextInserter: Попытка вставить пустой текст")
+            LogManager.app.failure("Вставка текста", message: "Попытка вставить пустой текст")
             return
         }
 
-        print("TextInserter: Вставка текста (\(text.count) символов)")
+        LogManager.app.begin("Вставка текста", details: "\(text.count) символов")
 
         // Сохраняем старое содержимое clipboard
         let oldClipboardTypes = pasteboard.types ?? []
@@ -30,62 +30,101 @@ public class TextInserter {
             }
         }
 
-        // Копируем новый текст в clipboard
+        LogManager.app.debug("Сохранено \(oldClipboardData.count) типов из clipboard")
+
+        // Очищаем и копируем новый текст в clipboard
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        let success = pasteboard.setString(text, forType: .string)
+
+        if !success {
+            LogManager.app.failure("Копирование в clipboard", message: "Не удалось скопировать текст")
+            return
+        }
+
+        LogManager.app.debug("Текст скопирован в clipboard")
+
+        // Даем время системе обработать изменение clipboard
+        usleep(50000) // 50ms
 
         // Симулируем Cmd+V
         simulatePaste()
 
-        // Восстанавливаем старый clipboard через 300ms
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        // Восстанавливаем старый clipboard через 500ms (увеличена задержка)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.restoreClipboard(oldClipboardData)
         }
+
+        LogManager.app.success("Вставка текста", details: "Cmd+V выполнено")
     }
 
     /// Симуляция нажатия Cmd+V
     private func simulatePaste() {
-        let source = CGEventSource(stateID: .hidSystemState)
+        // Проверяем Accessibility разрешения
+        let trusted = AXIsProcessTrusted()
+        if !trusted {
+            LogManager.app.failure("Accessibility разрешения", message: "Приложение не имеет Accessibility разрешений для симуляции клавиш")
+            LogManager.app.info("Откройте System Settings > Privacy & Security > Accessibility и добавьте PushToTalk")
+            return
+        }
+
+        LogManager.app.debug("Accessibility разрешения: ✓ Получены")
+
+        // Проверяем возможность создания событий
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            LogManager.app.failure("Создание CGEventSource", message: "Не удалось создать источник событий")
+            return
+        }
 
         // Key code для 'V' = 9
-        let keyVDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
-        let keyVUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+        guard let keyVDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+              let keyVUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
+            LogManager.app.failure("Создание CGEvent", message: "Не удалось создать события клавиатуры")
+            return
+        }
 
         // Добавляем модификатор Command
-        keyVDown?.flags = .maskCommand
-        keyVUp?.flags = .maskCommand
+        keyVDown.flags = .maskCommand
+        keyVUp.flags = .maskCommand
 
         // Отправляем события
-        keyVDown?.post(tap: .cghidEventTap)
-        usleep(10000) // 10ms задержка
-        keyVUp?.post(tap: .cghidEventTap)
+        keyVDown.post(tap: .cghidEventTap)
+        LogManager.app.debug("Отправлено: Cmd+V down")
 
-        print("TextInserter: ✓ Cmd+V симулировано")
+        usleep(50000) // 50ms задержка между down и up
+
+        keyVUp.post(tap: .cghidEventTap)
+        LogManager.app.debug("Отправлено: Cmd+V up")
     }
 
     /// Восстановление старого содержимого clipboard
     private func restoreClipboard(_ oldData: [NSPasteboard.PasteboardType: Data]) {
         guard !oldData.isEmpty else {
-            print("TextInserter: Нечего восстанавливать в clipboard")
+            LogManager.app.debug("Нечего восстанавливать в clipboard")
             return
         }
 
         pasteboard.clearContents()
 
+        var restoredCount = 0
         for (type, data) in oldData {
-            pasteboard.setData(data, forType: type)
+            if pasteboard.setData(data, forType: type) {
+                restoredCount += 1
+            }
         }
 
-        print("TextInserter: ✓ Clipboard восстановлен")
+        LogManager.app.success("Clipboard восстановлен", details: "\(restoredCount) типов")
     }
 
     // MARK: - Альтернативный метод через Accessibility API
 
     /// Вставка текста напрямую через Accessibility API (экспериментально)
     /// Работает не во всех приложениях
+    /// ТРЕБУЕТ Accessibility разрешений!
     public func insertTextViaAccessibility(_ text: String) -> Bool {
+        LogManager.app.begin("Вставка через Accessibility API")
+
         guard let focusedElement = getFocusedElement() else {
-            print("TextInserter: Не найден элемент в фокусе")
+            LogManager.app.failure("Получение элемента в фокусе", message: "Не найден")
             return false
         }
 
@@ -100,11 +139,13 @@ public class TextInserter {
             let setError = AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, newValue as CFTypeRef)
 
             if setError == .success {
-                print("TextInserter: ✓ Текст вставлен через Accessibility API")
+                LogManager.app.success("Вставка через Accessibility API", details: "Успешно")
                 return true
             } else {
-                print("TextInserter: ✗ Ошибка вставки через Accessibility API: \(setError.rawValue)")
+                LogManager.app.failure("Вставка через Accessibility API", message: "OSStatus: \(setError.rawValue)")
             }
+        } else {
+            LogManager.app.failure("Чтение значения элемента", message: "OSStatus: \(error.rawValue)")
         }
 
         return false
