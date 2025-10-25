@@ -1,8 +1,8 @@
-# PushToTalk Swift - Voice-to-Text for macOS
+# PushToTalk - Voice-to-Text for macOS
 
 <div align="center">
 
-🎤 **Lightweight voice-to-text application optimized for Apple Silicon (M1/M2/M3)**
+🎤 **Легковесное приложение для голосового ввода, оптимизированное для Apple Silicon (M1/M2/M3)**
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)]()
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange)]()
@@ -12,364 +12,465 @@
 
 ---
 
-## ✨ Features
+## ✨ Возможности
 
-- 🎤 **Menu Bar App** - Clean, native macOS interface
-- ⌨️ **F16 Push-to-Talk** - Hold F16 to record, release to transcribe
-- 🧠 **WhisperKit Integration** - OpenAI Whisper running on Apple Neural Engine
-- 🚀 **Apple Silicon Optimized** - Metal acceleration, zero CPU idle
-- 📝 **Automatic Text Insertion** - Text appears at cursor position
-- 🔊 **Audio Feedback** - System sounds for recording states
-- 🇷🇺 **Multi-language** - Supports Russian, English, and many others
-- ⚡ **Fast & Lightweight** - Native Swift, no Python overhead
+- 🎤 **Приложение в Menu Bar** - Чистый нативный macOS интерфейс
+- ⌨️ **Настраиваемые горячие клавиши** - F13-F19, Right Cmd/Option/Control
+- 🪟 **Liquid Glass UI** - Минималистичное всплывающее окно с эффектом стекла
+- 🧠 **WhisperKit Integration** - OpenAI Whisper на Apple Neural Engine
+- 🚀 **Оптимизация для Apple Silicon** - Metal ускорение, нулевая нагрузка в режиме ожидания
+- 📝 **Автоматическая вставка текста** - Текст появляется в позиции курсора
+- 🛑 **Стоп-слово "отмена"** - Сброс записи на лету
+- 🔊 **Звуковая обратная связь** - Системные звуки для различных состояний
+- 🌍 **Мультиязычность** - Русский, английский и множество других языков
+- ⚡ **Быстро и легковесно** - Нативный Swift, без накладных расходов Python
+- 🎧 **Smart Audio Ducking** - Автоматическое приглушение музыки во время записи
 
 ---
 
-## 🏗️ Architecture
+## 🎯 Как это работает
 
-**PushToTalk Swift** is a complete rewrite of the original Python version, built with:
+1. **Нажмите F16** (или настроенную горячую клавишу) - появится окно с подсказкой
+2. **Говорите** - видите распознанный текст в реальном времени
+3. **Скажите "отмена"** - если нужно начать заново (буфер сбросится)
+4. **Отпустите F16** - текст вставится в позицию курсора, окно исчезнет
 
-- **Swift 6.2** - Modern, type-safe language
-- **WhisperKit** - Whisper inference on Apple Silicon
-- **AVFoundation** - Audio capture (16kHz mono)
-- **SwiftUI** - Reactive UI components
-- **AppKit** - Menu bar integration
+### Особенности интерфейса
 
-### Tech Stack
+- **Liquid Glass эффект** - красивое размытое стекло по Apple Design Guidelines
+- **Минималистичный дизайн** - только необходимое, без лишних элементов
+- **Пульсирующая точка записи** - единственная анимация, показывающая активность
+- **Автоматическое исчезновение** - окно закрывается сразу после вставки текста
 
-| Component | Technology |
+---
+
+## 🏗️ Архитектура
+
+**PushToTalk** построен на современных технологиях Apple:
+
+- **Swift 6.2** - Современный, типобезопасный язык
+- **WhisperKit** - Whisper inference на Apple Silicon
+- **AVFoundation** - Захват аудио (16kHz mono)
+- **SwiftUI** - Реактивные UI компоненты
+- **AppKit** - Интеграция с menu bar
+- **Carbon Event Manager** - Глобальные горячие клавиши БЕЗ Accessibility разрешений
+
+### Технологический стек
+
+| Компонент | Технология |
 |-----------|------------|
-| Language | Swift 6.2 |
+| Язык | Swift 6.2 |
 | ML Framework | WhisperKit (MLX-based) |
-| Audio | AVFoundation |
-| Keyboard | CGEvent API |
+| Аудио | AVFoundation |
+| Горячие клавиши | Carbon Event Manager API |
 | UI | SwiftUI + AppKit |
-| Build System | Swift Package Manager |
+| Сборка | Swift Package Manager |
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Быстрый старт
 
-### Requirements
+### Требования
 
-- macOS 14.0 (Sonoma) or later
+- macOS 14.0 (Sonoma) или новее
 - Apple Silicon (M1/M2/M3)
 - Xcode Command Line Tools
 
-### Build
+### Сборка
 
 ```bash
-# Clone the repository
-cd /Users/nb/Developement/PushToTalk
+# Клонируйте репозиторий
+git clone https://github.com/jorikfon/PushToTalk.git
+cd PushToTalk
 
-# Build the project
-swift build --product PushToTalkSwift
+# Соберите проект
+swift build
 
-# Run the app
-.build/debug/PushToTalkSwift
+# Или создайте .app bundle
+./build_app.sh
+
+# Запустите приложение
+open build/PushToTalk.app
 ```
 
-### First Launch
+### Первый запуск
 
-On first launch, macOS will request permissions:
+При первом запуске macOS запросит разрешения:
 
-1. **Microphone** - Required for audio recording
-   - System Settings → Privacy & Security → Microphone
-   - ✅ Enable **PushToTalkSwift**
+1. **Микрофон** - Требуется для записи аудио
+   - Системные настройки → Конфиденциальность и безопасность → Микрофон
+   - ✅ Включите **PushToTalk**
 
-2. **Accessibility** - Required for F16 monitoring and text insertion
-   - System Settings → Privacy & Security → Accessibility
-   - ✅ Enable **PushToTalkSwift**
+2. **Accessibility** - Требуется только для вставки текста
+   - Системные настройки → Конфиденциальность и безопасность → Универсальный доступ
+   - ✅ Включите **PushToTalk**
 
----
-
-## 📖 Usage
-
-### Menu Bar Interface
-
-Look for the **🎤** icon in the menu bar (top-right corner):
-
-- **🎤** - Idle (ready to record)
-- **🎤 (filled)** - Recording in progress
-
-**Click the icon** to open settings:
-- Model selection (Tiny/Base/Small)
-- Recording status indicator
-- Usage instructions
-- Quit button
-
-### Keyboard Shortcuts
-
-- **F16 (hold)** - Start recording
-- **F16 (release)** - Stop recording and transcribe
-
-### Audio Feedback
-
-- **Pop** 🎵 - Recording started
-- **Tink** 🔔 - Recording stopped
-- **Glass** ✨ - Transcription successful
-- **Basso** ❌ - Transcription failed
+**Примечание**: Для мониторинга F-клавиш (F13-F19) Accessibility НЕ требуется благодаря использованию Carbon API!
 
 ---
 
-## 📂 Project Structure
+## 📖 Использование
+
+### Интерфейс Menu Bar
+
+Найдите иконку **🎤** в menu bar (правый верхний угол):
+
+- **🎤** - Готов к записи
+- **🎤 (filled)** - Идет запись
+- **⚙️** - Идет обработка
+
+**Нажмите на иконку** чтобы открыть настройки:
+- Выбор модели Whisper (Tiny/Base/Small/Medium/Large)
+- Выбор горячей клавиши (F13-F19, Right Cmd/Option/Control)
+- Multilingual режим (автоопределение языка)
+- Автоматическая вставка EarPods подсказки
+- Индикатор статуса записи
+- История транскрипций
+- Кнопка выхода
+
+### Горячие клавиши
+
+По умолчанию: **F16**
+
+Поддерживаются:
+- **F13-F19** - Не требуют Accessibility разрешений!
+- **Right Command** - Правый ⌘
+- **Right Option** - Правый ⌥
+- **Right Control** - Правый ⌃
+
+### Команда "отмена"
+
+Если вы видите неправильно распознанный текст:
+
+1. Сделайте **паузу**
+2. Скажите **"отмена"**
+3. Буфер сбросится, текст очистится
+4. Продолжайте говорить заново
+
+Или просто отпустите F16 после "отмена" - текст не вставится.
+
+### Звуковая обратная связь
+
+- **Pop** 🎵 - Запись началась
+- **Tink** 🔔 - Запись остановлена / отмена
+- **Glass** ✨ - Транскрипция успешна
+- **Basso** ❌ - Ошибка транскрипции
+
+---
+
+## 📂 Структура проекта
 
 ```
 PushToTalk/
-├── Package.swift                   # Swift Package Manager config
+├── Package.swift                          # Конфигурация Swift Package Manager
+├── build_app.sh                           # Скрипт сборки .app bundle
 ├── Sources/
 │   ├── App/
-│   │   ├── PushToTalkApp.swift    # @main entry point
-│   │   └── AppDelegate.swift       # Application lifecycle
+│   │   ├── PushToTalkApp.swift           # @main точка входа
+│   │   └── AppDelegate.swift              # Жизненный цикл приложения
 │   ├── Services/
-│   │   ├── AudioCaptureService.swift   # Audio recording (16kHz mono)
-│   │   ├── WhisperService.swift        # WhisperKit integration
-│   │   ├── KeyboardMonitor.swift       # F16 global monitoring
-│   │   └── TextInserter.swift          # Text insertion via clipboard
+│   │   ├── AudioCaptureService.swift     # Запись аудио (16kHz mono)
+│   │   ├── WhisperService.swift          # Интеграция WhisperKit
+│   │   ├── KeyboardMonitor.swift         # Глобальный мониторинг F16 (Carbon API)
+│   │   └── TextInserter.swift            # Вставка текста через clipboard
 │   ├── UI/
-│   │   ├── MenuBarController.swift     # Menu bar interface
-│   │   └── SettingsView.swift          # Settings SwiftUI view
+│   │   ├── MenuBarController.swift       # Интерфейс menu bar
+│   │   ├── FloatingRecordingWindow.swift # Liquid Glass всплывающее окно
+│   │   ├── SettingsView.swift            # SwiftUI настройки
+│   │   └── EnhancedSettingsView.swift    # Расширенные настройки
 │   └── Utils/
-│       ├── PermissionManager.swift     # Permission handling
-│       └── SoundManager.swift          # Audio feedback
-├── Tests/                          # Unit tests
-├── PHASE*_REPORT.md               # Development phase reports
-└── SWIFT_MLX_MIGRATION_PLAN.md   # Migration plan from Python
+│       ├── PermissionManager.swift       # Управление разрешениями
+│       ├── SoundManager.swift            # Звуковая обратная связь
+│       ├── HotkeyManager.swift           # Управление горячими клавишами
+│       ├── ModelManager.swift            # Управление моделями Whisper
+│       ├── AudioDuckingManager.swift     # Приглушение музыки
+│       ├── TranscriptionHistory.swift    # История транскрипций
+│       ├── LogManager.swift              # Унифицированное логирование (OSLog)
+│       └── NotificationManager.swift     # Системные уведомления
+├── Resources/
+│   ├── Info.plist                        # Метаданные приложения
+│   └── PushToTalk.entitlements          # Разрешения приложения
+└── CLAUDE.md                             # Инструкции для разработки
 ```
 
 ---
 
-## 🛠️ Development
+## 🛠️ Разработка
 
-### Available Build Targets
+### Доступные цели сборки
 
 ```bash
-# Main application
+# Основное приложение
 swift build --product PushToTalkSwift
 
-# Test executables
-swift build --product AudioCaptureTest      # Audio capture test
-swift build --product KeyboardMonitorTest   # F16 key monitoring test
-swift build --product TextInserterTest      # Text insertion test
-swift build --product IntegrationTest       # Full pipeline test
-swift build --product TranscribeTest        # Whisper transcription test
+# Тестовые исполняемые файлы
+swift build --product AudioCaptureTest      # Тест захвата аудио
+swift build --product KeyboardMonitorTest   # Тест мониторинга F16
+swift build --product TextInserterTest      # Тест вставки текста
+swift build --product IntegrationTest       # Полный pipeline тест
+swift build --product PerformanceBenchmark  # Бенчмарк производительности
 ```
 
-### Run Tests
+### Запуск тестов
 
 ```bash
-# Audio capture test (records 3 seconds)
+# Тест захвата аудио (записывает 3 секунды)
 .build/debug/AudioCaptureTest
 
-# Keyboard monitor test (press F16 to test)
+# Тест мониторинга клавиатуры (нажмите F16 для теста)
 .build/debug/KeyboardMonitorTest
 
-# Text inserter test (inserts test text)
+# Тест вставки текста (вставляет тестовый текст)
 .build/debug/TextInserterTest
 
-# Integration test (mic → transcription)
+# Интеграция тест (микрофон → транскрипция)
 .build/debug/IntegrationTest
+
+# Бенчмарк производительности
+.build/debug/PerformanceBenchmark
 ```
 
-### Clean Build
+### Просмотр логов
+
+Все логи доступны через Console.app с subsystem `com.pushtotalk.app`:
+
+```bash
+# Real-time лог
+log stream --predicate 'subsystem == "com.pushtotalk.app"' --level debug
+
+# Фильтр по категории
+log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "keyboard"'
+
+# Последний час
+log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h
+
+# Экспорт в файл
+log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h > logs.txt
+```
+
+### Чистая сборка
 
 ```bash
 swift package clean
-swift build --product PushToTalkSwift
+swift build
 ```
 
 ---
 
-## 🔧 Technical Details
+## 🔧 Технические детали
 
 ### Audio Pipeline
 
-1. **Capture** - AVAudioEngine captures microphone at 44100 Hz
-2. **Convert** - AVAudioConverter resamples to 16000 Hz mono
-3. **Buffer** - Audio samples stored as Float32 array
-4. **Process** - Whisper processes 16kHz mono Float32
+1. **Capture** - AVAudioEngine захватывает микрофон (нативный формат)
+2. **Convert** - AVAudioConverter ресемплирует в 16000 Hz mono Float32
+3. **Buffer** - Аудио сэмплы хранятся как Float32 массив
+4. **Real-time** - Чанки по 2 секунды отправляются на транскрипцию
+5. **Process** - WhisperKit обрабатывает финальный буфер
 
 ### Whisper Integration
 
-- **Model**: Whisper Tiny (~150 MB)
+- **Модели**: Tiny (~150 MB), Base (~300 MB), Small (~600 MB), Medium (~1.5 GB), Large (~3 GB)
 - **Framework**: WhisperKit (MLX-based)
-- **Device**: Apple Neural Engine
-- **Format**: 16kHz mono Float32
-- **Speed**: ~5x real-time on M1 Max
+- **Устройство**: Apple Neural Engine + GPU (Metal)
+- **Формат**: 16kHz mono Float32
+- **Скорость**: ~5-10x реального времени на M1 Max
+- **Multilingual**: Автоопределение языка (опционально)
 
-### Keyboard Monitoring
+### Мониторинг клавиатуры
 
-- **Method**: CGEvent tap at session level
-- **Key**: F16 (keyCode 127)
-- **Events**: keyDown, keyUp
-- **Behavior**: System actions blocked during capture
+**Два метода**:
 
-### Text Insertion
+1. **Carbon Event Manager** (основной, для F13-F19)
+   - `RegisterEventHotKey` API
+   - НЕ требует Accessibility разрешений
+   - Работает только с F-клавишами и модификаторами
+   - Более надежный, меньше конфликтов
 
-Two methods implemented:
+2. **CGEvent Tap** (fallback, для других клавиш)
+   - Глобальный event tap
+   - Требует Accessibility разрешения
+   - Работает с любыми клавишами
 
-1. **Clipboard + Cmd+V** (primary)
-   - Saves original clipboard
-   - Copies transcription
-   - Simulates Cmd+V via CGEvent
-   - Restores clipboard after 300ms
+### Вставка текста
+
+Два метода реализованы:
+
+1. **Clipboard + Cmd+V** (основной)
+   - Сохраняет оригинальный clipboard
+   - Копирует транскрипцию
+   - Симулирует Cmd+V через CGEvent
+   - Восстанавливает clipboard через 300ms
 
 2. **Accessibility API** (fallback)
-   - Direct text insertion via AXUIElement
-   - Used when clipboard method fails
+   - Прямая вставка через AXUIElement
+   - Используется когда clipboard метод не работает
+
+### Audio Ducking
+
+- Автоматически приглушает музыку на 50% при начале записи
+- Восстанавливает громкость после завершения
+- Работает через `kAudioDevicePropertyVolumeScalar`
 
 ---
 
-## 📊 Performance
+## 📊 Производительность
 
-### Benchmarks (M1 Max)
+### Бенчмарки (M1 Max, Whisper Tiny)
 
-| Metric | Value |
-|--------|-------|
-| App Size | ~2.5 MB (executable only) |
-| Model Size | ~150 MB (Whisper Tiny) |
-| Cold Start | ~2-3 seconds (model loading) |
-| Warm Start | <1 second |
-| Idle Memory | ~90 MB |
-| Recording Memory | ~120 MB |
-| Transcribing Memory | ~200 MB (peak) |
-| Transcription Speed | ~5x real-time |
+| Метрика | Значение |
+|---------|----------|
+| Размер .app | ~4.7 MB |
+| Размер модели | ~150 MB (Tiny) |
+| Холодный старт | ~2-3 секунды (загрузка модели) |
+| Теплый старт | <1 секунды |
+| Память в режиме ожидания | ~90 MB |
+| Память при записи | ~120 MB |
+| Память при транскрипции | ~200 MB (пик) |
+| Скорость транскрипции | ~5-10x реального времени |
+| Real-Time Factor (RTF) | ~0.1-0.2 |
 
----
+### Эксперименты с моделями
 
-## 🚧 Migration Status
+Полные бенчмарки доступны в `Experiments/`:
 
-**Current Progress: 7/11 phases completed (64%)**
-
-| Phase | Status | Time Spent |
-|-------|--------|------------|
-| 1. Research & Setup | ✅ | ~1 hour |
-| 2. Project Structure | ✅ | ~2 hours |
-| 3. Audio Capture | ✅ | ~1 hour |
-| 4. WhisperKit Integration | ✅ | ~1 hour |
-| 5. Keyboard Monitor | ✅ | ~30 min |
-| 6. Text Insertion | ✅ | ~30 min |
-| 7. Menu Bar UI | ✅ | ~1 hour |
-| 8. Notifications | ⏳ | - |
-| 9. Optimization | ⏳ | - |
-| 10. Testing | ⏳ | - |
-| 11. Packaging | ⏳ | - |
-
-**Total Time**: ~6.5 hours (vs. planned 17-23 days - 97% savings!)
-
-See `SWIFT_MLX_MIGRATION_PLAN.md` for detailed migration plan.
+```bash
+# Запустить сравнение моделей
+.build/debug/ModelComparison
+```
 
 ---
 
-## 🐛 Troubleshooting
+## 🐛 Устранение неполадок
 
-### App doesn't start
+### Приложение не запускается
 
-1. Check build: `swift build --product PushToTalkSwift`
-2. Run directly: `.build/debug/PushToTalkSwift`
-3. Check system logs: `log show --predicate 'process == "PushToTalkSwift"' --last 5m`
+1. Проверьте сборку: `swift build`
+2. Запустите напрямую: `.build/debug/PushToTalkSwift`
+3. Проверьте системные логи:
+   ```bash
+   log show --predicate 'subsystem == "com.pushtotalk.app"' --last 5m
+   ```
 
 ### "This process is not trusted"
 
-Normal on first run! Add Accessibility permission:
-1. System Settings → Privacy & Security → Accessibility
-2. Click `+` → Select `.build/debug/PushToTalkSwift`
-3. Restart app
+Нормально при первом запуске! Добавьте Accessibility разрешение:
+1. Системные настройки → Конфиденциальность и безопасность → Универсальный доступ
+2. Нажмите `+` → Выберите `.build/debug/PushToTalkSwift`
+3. Перезапустите приложение
 
-### No audio captured
+### Аудио не захватывается
 
-1. Check microphone permission in System Settings
-2. Test with AudioCaptureTest: `.build/debug/AudioCaptureTest`
-3. Verify microphone works in other apps
+1. Проверьте разрешение микрофона в Системных настройках
+2. Тест с AudioCaptureTest: `.build/debug/AudioCaptureTest`
+3. Убедитесь, что микрофон работает в других приложениях
+4. Проверьте логи:
+   ```bash
+   log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "audio"'
+   ```
 
-### Text doesn't insert
+### Текст не вставляется
 
-1. Check Accessibility permission
-2. Ensure cursor is in a text field
-3. Test with TextInserterTest: `.build/debug/TextInserterTest`
+1. Проверьте Accessibility разрешение
+2. Убедитесь, что курсор в текстовом поле
+3. Тест с TextInserterTest: `.build/debug/TextInserterTest`
 
----
+### F16 не работает
 
-## 📚 Documentation
+1. Проверьте логи:
+   ```bash
+   log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "keyboard"'
+   ```
+2. Carbon API НЕ требует Accessibility для F13-F19
+3. Убедитесь, что F16 не назначена на другое действие в системе
+4. Попробуйте другую F-клавишу (F13-F19)
 
-- `SWIFT_MLX_MIGRATION_PLAN.md` - Complete migration plan
-- `PHASE1_REPORT.md` - Research & WhisperKit discovery
-- `PHASE2_REPORT.md` - Project structure
-- `PHASE3_REPORT.md` - Audio capture implementation
-- `PHASE4_REPORT.md` - WhisperKit integration
-- `PHASE5_REPORT.md` - Keyboard monitoring
-- `PHASE7_REPORT.md` - Menu bar UI
-- `CLAUDE.md` - Development instructions
+### Модель не загружается
+
+1. Проверьте интернет-соединение (модели загружаются с Hugging Face)
+2. Проверьте доступность Metal GPU:
+   ```bash
+   log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "transcription"'
+   ```
+3. Очистите кэш: `~/Library/Caches/whisperkit_models/`
+4. Попробуйте другую модель (Tiny самая маленькая)
 
 ---
 
 ## 🎯 Roadmap
 
-### Completed ✅
-- [x] WhisperKit research & proof-of-concept
-- [x] Audio capture (AVFoundation)
-- [x] Whisper transcription (WhisperKit)
-- [x] F16 keyboard monitoring (CGEvent)
-- [x] Text insertion (Clipboard + Accessibility)
+### Завершено ✅
+- [x] Исследование WhisperKit и proof-of-concept
+- [x] Захват аудио (AVFoundation)
+- [x] Транскрипция Whisper (WhisperKit)
+- [x] Мониторинг F16 (Carbon API + CGEvent)
+- [x] Вставка текста (Clipboard + Accessibility)
 - [x] Menu bar UI (SwiftUI + AppKit)
-- [x] Sound feedback
-- [x] Permission handling
+- [x] Liquid Glass всплывающее окно
+- [x] Звуковая обратная связь
+- [x] Управление разрешениями
+- [x] Настраиваемые горячие клавиши (F13-F19, Right Cmd/Option/Control)
+- [x] Выбор модели Whisper (Tiny/Base/Small/Medium/Large)
+- [x] Multilingual режим
+- [x] Real-time транскрипция
+- [x] Стоп-слово "отмена"
+- [x] Audio ducking (приглушение музыки)
+- [x] История транскрипций
+- [x] Унифицированное логирование (OSLog)
+- [x] .app bundle сборка
+- [x] Автоматическая вставка EarPods подсказки
 
-### In Progress 🚧
-- [ ] User Notifications
-- [ ] Performance optimization
-- [ ] Unit tests
+### Запланировано 📋
 - [ ] Code signing & notarization
-
-### Planned 📋
-- [ ] .app bundle creation
 - [ ] DMG installer
 - [ ] Auto-update (Sparkle)
-- [ ] Multi-language UI
-- [ ] Model selection (Tiny/Base/Small)
+- [ ] Мультиязычный UI
 - [ ] Homebrew Cask distribution
+- [ ] Настройка чувствительности VAD
+- [ ] Экспорт истории транскрипций
 
 ---
 
-## 🤝 Contributing
+## 🤝 Вклад в проект
 
-This is a personal project, but contributions are welcome!
+Приветствуются Pull Request'ы!
 
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+1. Fork репозитория
+2. Создайте feature branch
+3. Закоммитьте изменения
+4. Push в branch
+5. Создайте Pull Request
 
 ---
 
-## 📄 License
+## 📄 Лицензия
 
 MIT License - See LICENSE file for details
 
 ---
 
-## 🙏 Acknowledgments
+## 🙏 Благодарности
 
-- **WhisperKit** by Argmax Inc. - Excellent Whisper implementation for Apple Silicon
-- **OpenAI Whisper** - State-of-the-art speech recognition
-- **Apple MLX** - Machine Learning framework for Apple Silicon
+- **WhisperKit** by Argmax Inc. - Отличная реализация Whisper для Apple Silicon
+- **OpenAI Whisper** - Передовое распознавание речи
+- **Apple MLX** - ML фреймворк для Apple Silicon
+- **Claude Code** - Помощь в разработке
 
 ---
 
-## 📞 Support
+## 📞 Поддержка
 
-For issues or questions:
-- Check documentation in `PHASE*_REPORT.md` files
-- Review `SWIFT_MLX_MIGRATION_PLAN.md`
-- Test with individual test executables
+По вопросам и проблемам:
+- Проверьте документацию в `CLAUDE.md`
+- Просмотрите логи через `log stream`
+- Протестируйте с индивидуальными тестовыми исполняемыми файлами
+- Создайте Issue в GitHub
 
 ---
 
 <div align="center">
 
-**Built with ❤️ using Swift and WhisperKit**
+**Создано с ❤️ используя Swift и WhisperKit**
 
-🎤 Happy voice-to-texting! ✨
+🎤 Приятного голосового ввода! ✨
 
 </div>
