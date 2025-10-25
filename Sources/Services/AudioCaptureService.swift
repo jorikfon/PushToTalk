@@ -11,6 +11,11 @@ public class AudioCaptureService: ObservableObject {
     @Published public var isRecording = false
     @Published public var permissionGranted = false
 
+    // Callback для real-time обработки чанков (вызывается каждые N секунд)
+    public var onAudioChunkReady: (([Float]) -> Void)?
+    private let chunkDurationSeconds: Float = 2.0  // Размер чанка в секундах
+    private var lastChunkProcessedAt: Int = 0  // Количество сэмплов на момент последней обработки
+
     public init() {
         LogManager.audio.info("Инициализация AudioCaptureService")
     }
@@ -55,6 +60,7 @@ public class AudioCaptureService: ObservableObject {
         }
 
         audioBuffer.removeAll()
+        lastChunkProcessedAt = 0  // Сброс счетчика чанков
         LogManager.audio.debug("Буфер очищен")
 
         let inputNode = audioEngine.inputNode
@@ -143,6 +149,18 @@ public class AudioCaptureService: ObservableObject {
         return result
     }
 
+    /// Очистить буфер записи (для команды "отмена")
+    public func clearBuffer() {
+        LogManager.audio.info("Очистка буфера аудио (команда отмена)")
+
+        bufferLock.lock()
+        audioBuffer.removeAll()
+        lastChunkProcessedAt = 0
+        bufferLock.unlock()
+
+        LogManager.audio.success("Буфер очищен", details: "Запись начата с начала")
+    }
+
     /// Обработка буфера аудио с конвертацией
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter, outputFormat: AVAudioFormat) {
         // Вычисляем размер выходного буфера
@@ -187,6 +205,34 @@ public class AudioCaptureService: ObservableObject {
         // Логируем каждый 10-й буфер
         if oldCount % 16000 < 4096 {
             LogManager.audio.debug("Добавлено \(samples.count) сэмплов, всего: \(newCount) (\(String(format: "%.2f", Float(newCount) / 16000.0))s)")
+        }
+
+        // Проверяем, нужно ли обработать очередной чанк
+        checkAndProcessChunk(currentBufferSize: newCount)
+    }
+
+    /// Проверяет накопленное аудио и вызывает callback для обработки чанка
+    /// ВАЖНО: Отправляет ВСЁ накопленное аудио с начала записи (кумулятивный подход)
+    private func checkAndProcessChunk(currentBufferSize: Int) {
+        let chunkSizeInSamples = Int(chunkDurationSeconds * 16000)  // 2 сек * 16000 Hz = 32000 сэмплов
+        let samplesAccumulated = currentBufferSize - lastChunkProcessedAt
+
+        // Если накопили достаточно для следующего интервала
+        if samplesAccumulated >= chunkSizeInSamples {
+            bufferLock.lock()
+            // КУМУЛЯТИВНЫЙ ПОДХОД: Копируем ВСЁ аудио от начала до текущей позиции
+            // Это даёт модели больше контекста и улучшает точность распознавания
+            let cumulativeChunk = Array(audioBuffer[0..<currentBufferSize])
+            lastChunkProcessedAt = currentBufferSize
+            bufferLock.unlock()
+
+            let chunkDuration = Float(cumulativeChunk.count) / 16000.0
+            LogManager.audio.info("Кумулятивный чанк готов: \(cumulativeChunk.count) сэмплов (\(String(format: "%.2f", chunkDuration))s)")
+
+            // Вызываем callback на главном потоке
+            DispatchQueue.main.async { [weak self] in
+                self?.onAudioChunkReady?(cumulativeChunk)
+            }
         }
     }
 

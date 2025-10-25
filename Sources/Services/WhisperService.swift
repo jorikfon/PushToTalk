@@ -17,7 +17,7 @@ public class WhisperService {
     private var transcriptionCount: Int = 0
     private var totalRTF: Double = 0
 
-    public init(modelSize: String = "tiny") {
+    public init(modelSize: String = "small") {
         self.modelSize = modelSize
         LogManager.transcription.info("Инициализация WhisperService с моделью \(modelSize)")
     }
@@ -59,6 +59,37 @@ public class WhisperService {
         LogManager.transcription.debug("Backend: MLX (Metal optimized)")
     }
 
+    /// Быстрая транскрипция чанка для real-time отображения (упрощенные настройки)
+    /// - Parameter audioSamples: Массив Float32 аудио сэмплов (16kHz mono)
+    /// - Returns: Распознанный текст
+    public func transcribeChunk(audioSamples: [Float]) async throws -> String {
+        guard let whisperKit = whisperKit else {
+            throw WhisperError.modelNotLoaded
+        }
+
+        // ОПТИМАЛЬНЫЕ настройки для СМЕШАННОЙ речи (RU+EN)
+        // Auto-detect даёт лучший результат для code-switching
+        let options = DecodingOptions(
+            task: .transcribe,        // TRANSCRIBE, не translate!
+            language: nil,            // nil = auto-detect для смешанной речи
+            temperature: 0.0,         // Детерминированный вывод
+            usePrefillPrompt: true,   // ✅ Контекст для технических терминов
+            usePrefillCache: true,    // ✅ Кэширование контекста
+            detectLanguage: true      // ✅ Автоопределение языка для каждого сегмента
+        )
+
+        let results = try await whisperKit.transcribe(
+            audioArray: audioSamples,
+            decodeOptions: options
+        )
+
+        guard let firstResult = results.first else {
+            return ""
+        }
+
+        return firstResult.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+    }
+
     /// Транскрипция аудио данных с измерением производительности
     /// - Parameter audioSamples: Массив Float32 аудио сэмплов (16kHz mono)
     /// - Returns: Распознанный текст
@@ -76,20 +107,19 @@ public class WhisperService {
         let startTime = Date()
 
         do {
-            // WhisperKit ожидает аудио массив
-            // Язык можно настроить в UserSettings
-            // "ru" - русский язык, но модель также распознает английские слова в контексте
-            let language = UserSettings.shared.transcriptionLanguage
+            // ОПТИМАЛЬНЫЕ настройки для СМЕШАННОЙ речи (RU+EN)
+            // Auto-detect даёт лучший результат для code-switching
             let options = DecodingOptions(
-                task: .transcribe,   // transcribe (не translate!)
-                language: language,  // "ru" по умолчанию (хорошо работает с mixed content)
-                // NOTE: promptTokens требует токенизации, будет добавлено позже
-                usePrefillPrompt: true,  // Используем prefill для контекста
-                detectLanguage: language == nil  // Автоопределение только если язык не задан
+                task: .transcribe,      // transcribe (не translate!)
+                language: nil,          // nil = auto-detect для смешанной речи
+                temperature: 0.0,       // Детерминированный вывод
+                usePrefillPrompt: true, // Используем prefill для контекста (технические термины)
+                usePrefillCache: true,  // Кэширование
+                detectLanguage: true    // Автоопределение языка для каждого сегмента
             )
 
             // Логирование настроек
-            LogManager.transcription.debug("Язык: \(language ?? "auto"), detectLanguage: \(language == nil)")
+            LogManager.transcription.debug("Режим: auto-detect (смешанная речь RU+EN)")
 
             // TODO: Добавить токенизацию промпта когда получим доступ к tokenizer
             if let prompt = promptText, !prompt.isEmpty {

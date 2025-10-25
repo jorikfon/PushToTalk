@@ -10,13 +10,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var audioService: AudioCaptureService?
     private var whisperService: WhisperService?
     private var keyboardMonitor: KeyboardMonitor?
-    private var mediaKeyMonitor: MediaKeyMonitor?
     private var textInserter: TextInserter?
     private var floatingWindow: FloatingRecordingWindow?
 
     // Менеджеры
     private let audioDuckingManager = AudioDuckingManager.shared
     private let audioDeviceManager = AudioDeviceManager.shared
+
+    // Real-time транскрипция
+    private var partialTranscriptionText: String = ""
+    private var isTranscribingChunk = false  // Флаг для предотвращения параллельных транскрипций
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         LogManager.app.info("=== PushToTalk Starting ===")
@@ -42,9 +45,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func initializeServices() {
         menuBarController = MenuBarController()
         audioService = AudioCaptureService()
-        whisperService = WhisperService(modelSize: "tiny")
+        whisperService = WhisperService(modelSize: "small")  // Лучше для смешанной речи RU+EN
         keyboardMonitor = KeyboardMonitor()
-        mediaKeyMonitor = MediaKeyMonitor()
         textInserter = TextInserter()
         floatingWindow = FloatingRecordingWindow()
 
@@ -164,30 +166,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleHotkeyRelease()
         }
 
+        // Callback для обработки аудио чанков в real-time
+        audioService?.onAudioChunkReady = { [weak self] chunk in
+            self?.handleAudioChunk(chunk)
+        }
+
         let started = keyboardMonitor?.startMonitoring() ?? false
         if started {
             let hotkey = HotkeyManager.shared.currentHotkey.displayName
             LogManager.app.success("Мониторинг клавиатуры запущен", details: "Hotkey: \(hotkey)")
         } else {
             LogManager.app.failure("Мониторинг клавиатуры", message: "Не удалось запустить")
-        }
-
-        // Мониторинг медиа-кнопок (EarPods Play/Pause)
-        // ТРЕБУЕТ Accessibility разрешений
-        // Push-to-talk стиль: держишь кнопку - записывает, отпустил - останавливает
-        mediaKeyMonitor?.onPlayPausePress = { [weak self] in
-            self?.handleHotkeyPress()
-        }
-
-        mediaKeyMonitor?.onPlayPauseRelease = { [weak self] in
-            self?.handleHotkeyRelease()
-        }
-
-        let mediaStarted = mediaKeyMonitor?.startMonitoring() ?? false
-        if mediaStarted {
-            LogManager.app.success("Мониторинг медиа-кнопок запущен", details: "EarPods Play/Pause (push-to-talk)")
-        } else {
-            LogManager.app.info("Мониторинг медиа-кнопок не запущен (требуются Accessibility разрешения)")
         }
     }
 
@@ -197,6 +186,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleHotkeyPress() {
         let hotkey = HotkeyManager.shared.currentHotkey.displayName
         LogManager.app.info("=== \(hotkey) Pressed ===")
+
+        // Сброс промежуточного текста
+        partialTranscriptionText = ""
+        isTranscribingChunk = false
 
         do {
             // Приглушаем системную музыку
@@ -224,6 +217,60 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 message: errorMessage,
                 playSound: true
             )
+        }
+    }
+
+    /// Обработка аудио чанка для real-time транскрипции
+    /// КУМУЛЯТИВНЫЙ ПОДХОД: chunk содержит ВСЁ накопленное аудио с начала записи
+    private func handleAudioChunk(_ chunk: [Float]) {
+        // Пропускаем если уже идет обработка предыдущего чанка
+        guard !isTranscribingChunk else {
+            LogManager.app.debug("Пропущен чанк (идет обработка предыдущего)")
+            return
+        }
+
+        isTranscribingChunk = true
+        let chunkDuration = Float(chunk.count) / 16000.0
+
+        Task {
+            do {
+                // Быстрая транскрипция ВСЕГО накопленного аудио
+                let fullText = try await whisperService?.transcribeChunk(audioSamples: chunk) ?? ""
+
+                if !fullText.isEmpty {
+                    // Проверяем на стоп-слово "отмена"
+                    if fullText.lowercased().contains("отмена") {
+                        LogManager.app.info("🛑 Обнаружено стоп-слово 'отмена' - сброс буфера")
+
+                        await MainActor.run {
+                            // Сбрасываем буфер аудио
+                            audioService?.clearBuffer()
+
+                            // Очищаем текст
+                            partialTranscriptionText = ""
+
+                            // Показываем подсказку заново
+                            floatingWindow?.updatePartialTranscription("")
+
+                            // Звуковой сигнал об отмене
+                            SoundManager.shared.play(.recordingStopped)
+                        }
+                    } else {
+                        await MainActor.run {
+                            // ЗАМЕНЯЕМ текст полностью (не накапливаем!), т.к. транскрибируем всё аудио заново
+                            partialTranscriptionText = fullText
+
+                            // Обновляем UI
+                            floatingWindow?.updatePartialTranscription(fullText)
+                            LogManager.app.info("Кумулятивная транскрипция (\(String(format: "%.1f", chunkDuration))s): \"\(fullText)\"")
+                        }
+                    }
+                }
+            } catch {
+                LogManager.app.error("Ошибка транскрипции чанка: \(error.localizedDescription)")
+            }
+
+            isTranscribingChunk = false
         }
     }
 
@@ -263,6 +310,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let transcription = try await whisperService?.transcribe(audioSamples: audioData) ?? ""
 
             let duration = Date().timeIntervalSince(startTime)
+
+            // Проверяем на стоп-слово "отмена"
+            if transcription.lowercased().contains("отмена") {
+                LogManager.transcription.info("🛑 Обнаружено стоп-слово 'отмена' - текст не вставлен")
+
+                await MainActor.run {
+                    // Убираем иконку обработки
+                    menuBarController?.updateProcessingState(false)
+                    floatingWindow?.hide()  // Просто закрываем окно
+                    SoundManager.shared.play(.recordingStopped)  // Звук отмены
+                    audioDuckingManager.unduck()
+                }
+                return
+            }
 
             if !transcription.isEmpty {
                 LogManager.transcription.success("Транскрипция завершена", details: "\"\(transcription)\" (за \(String(format: "%.1f", duration))с)")
@@ -343,6 +404,5 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         LogManager.app.info("=== PushToTalk Terminating ===")
         keyboardMonitor?.stopMonitoring()
-        mediaKeyMonitor?.stopMonitoring()
     }
 }

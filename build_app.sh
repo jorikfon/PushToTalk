@@ -78,10 +78,12 @@ fi
 echo -e "${YELLOW}[6/7] Signing app bundle...${NC}"
 
 # Sign with entitlements if available
-if [ -f "Entitlements.plist" ]; then
-    codesign --force --deep --sign - --entitlements Entitlements.plist "${APP_DIR}" 2>/dev/null
+ENTITLEMENTS_FILE="Resources/PushToTalk.entitlements"
+if [ -f "${ENTITLEMENTS_FILE}" ]; then
+    codesign --force --deep --sign - --entitlements "${ENTITLEMENTS_FILE}" "${APP_DIR}" 2>/dev/null
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✅ App signed with ad-hoc signature + entitlements${NC}"
+        echo -e "${GREEN}   Entitlements: ${ENTITLEMENTS_FILE}${NC}"
     else
         # Fallback without entitlements
         codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null
@@ -89,7 +91,7 @@ if [ -f "Entitlements.plist" ]; then
     fi
 else
     codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null
-    echo -e "${GREEN}✅ App signed with ad-hoc signature${NC}"
+    echo -e "${GREEN}✅ App signed with ad-hoc signature (no entitlements found)${NC}"
 fi
 
 # Verify signature

@@ -9,7 +9,7 @@ public class MenuBarController: ObservableObject {
 
     @Published public var isRecording = false
     @Published public var isProcessing = false
-    @Published public var modelSize: String = "tiny"
+    @Published public var modelSize: String = "small"
 
     public init() {
         print("MenuBarController: Инициализация")

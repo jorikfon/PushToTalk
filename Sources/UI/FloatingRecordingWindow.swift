@@ -9,15 +9,14 @@ public class FloatingRecordingWindow: NSWindow {
 
     public init() {
         self.viewModel = RecordingViewModel()
-        // Создаем окно в правом нижнем углу экрана
+        // Создаем окно по центру экрана
         let screenFrame = NSScreen.main?.visibleFrame ?? .zero
-        let windowWidth: CGFloat = 280
-        let windowHeight: CGFloat = 120
-        let padding: CGFloat = 20
+        let windowWidth: CGFloat = 400
+        let windowHeight: CGFloat = 200
 
         let windowFrame = NSRect(
-            x: screenFrame.maxX - windowWidth - padding,
-            y: screenFrame.minY + padding,
+            x: screenFrame.midX - windowWidth / 2,
+            y: screenFrame.midY - windowHeight / 2,
             width: windowWidth,
             height: windowHeight
         )
@@ -56,8 +55,8 @@ public class FloatingRecordingWindow: NSWindow {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            // Обновляем состояние view через ViewModel
-            self.viewModel.updateState(.recording)
+            // Сразу показываем окно с подсказкой (пустой текст)
+            self.viewModel.updateState(.recordingWithText(partialText: ""))
 
             // Показываем окно с fade-in анимацией
             self.alphaValue = 0
@@ -69,6 +68,16 @@ public class FloatingRecordingWindow: NSWindow {
             })
 
             LogManager.app.debug("FloatingRecordingWindow: показано (запись)")
+        }
+    }
+
+    /// Обновить промежуточный текст во время записи
+    public func updatePartialTranscription(_ text: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            self.viewModel.updateState(.recordingWithText(partialText: text))
+            LogManager.app.debug("FloatingRecordingWindow: обновлен частичный текст")
         }
     }
 
@@ -87,14 +96,10 @@ public class FloatingRecordingWindow: NSWindow {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            self.viewModel.updateState(.success(text: text, duration: duration))
+            // Сразу скрываем окно после транскрипции
+            self.hide()
 
-            // Автоматически скрыть через 2 секунды
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.hide()
-            }
-
-            LogManager.app.debug("FloatingRecordingWindow: результат показан")
+            LogManager.app.debug("FloatingRecordingWindow: результат показан, окно скрыто")
         }
     }
 
@@ -151,8 +156,9 @@ class RecordingViewModel: ObservableObject {
 
 // MARK: - Recording Status View
 
-enum RecordingState {
+enum RecordingState: Equatable {
     case recording
+    case recordingWithText(partialText: String)  // Запись с промежуточным текстом
     case processing
     case success(text: String, duration: TimeInterval)
     case error(message: String)
@@ -163,106 +169,152 @@ struct RecordingStatusView: View {
 
     var body: some View {
         ZStack {
-            // Фон с blur эффектом
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
+            // Liquid Glass Background
+            ZStack {
+                // Основной blur
+                VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+
+                // Градиентные overlays
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.white.opacity(0.25),
+                        Color.white.opacity(0.12),
+                        Color.white.opacity(0.18),
+                        Color.white.opacity(0.08)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .blendMode(.overlay)
+
+                // Динамическое свечение
+                stateGlow
+                    .blendMode(.softLight)
+
+                // Градиентная граница
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(
+                        LinearGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Color.white.opacity(0.6), location: 0.0),
+                                .init(color: Color.white.opacity(0.25), location: 0.5),
+                                .init(color: Color.white.opacity(0.5), location: 1.0)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
+            }
+            .cornerRadius(20)
+            .shadow(color: stateShadowColor.opacity(0.25), radius: 12, x: 0, y: 6)
+            .shadow(color: .black.opacity(0.12), radius: 20, x: 0, y: 10)
 
             // Контент
-            VStack(spacing: 12) {
-                switch viewModel.state {
-                case .recording:
-                    recordingView
-                case .processing:
-                    processingView
-                case .success(let text, let duration):
-                    successView(text: text, duration: duration)
-                case .error(let message):
-                    errorView(message: message)
-                }
+            contentView
+                .padding(20)
+        }
+        .frame(width: dynamicWidth, height: dynamicHeight)
+        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.state)
+    }
+
+    // Динамические размеры окна с плавной анимацией
+    private var dynamicWidth: CGFloat {
+        return 400
+    }
+
+    private var dynamicHeight: CGFloat {
+        return 180
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        switch viewModel.state {
+        case .recording:
+            textTranscriptionView(partialText: "")
+        case .recordingWithText(let partialText):
+            textTranscriptionView(partialText: partialText)
+        case .processing:
+            textTranscriptionView(partialText: "")
+        case .success, .error:
+            EmptyView() // Окно сразу закрывается
+        }
+    }
+
+    // MARK: - Dynamic State Effects
+
+    /// Динамическое свечение фона в зависимости от состояния
+    @ViewBuilder
+    private var stateGlow: some View {
+        switch viewModel.state {
+        case .recording, .recordingWithText, .processing:
+            // Красное пульсирующее свечение при записи
+            RadialGradient(
+                gradient: Gradient(colors: [
+                    Color.red.opacity(0.12),
+                    Color.orange.opacity(0.06),
+                    Color.clear
+                ]),
+                center: .center,
+                startRadius: 10,
+                endRadius: 200
+            )
+        default:
+            Color.clear
+        }
+    }
+
+    /// Цвет тени в зависимости от состояния
+    private var stateShadowColor: Color {
+        switch viewModel.state {
+        case .recording, .recordingWithText, .processing:
+            return .red
+        default:
+            return .clear
+        }
+    }
+
+    // MARK: - Minimalist Views
+
+    /// Вид с текстом транскрипции
+    private func textTranscriptionView(partialText: String) -> some View {
+        VStack(spacing: 12) {
+            // Маленький микрофон сверху
+            HStack {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(
+                        LinearGradient(
+                            gradient: Gradient(colors: [.red, .pink]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(viewModel.pulseAnimation ? 1.2 : 0.8)
+                    .opacity(viewModel.pulseAnimation ? 1.0 : 0.5)
+                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: viewModel.pulseAnimation)
+
+                Spacer()
             }
-            .padding(16)
-        }
-        .frame(width: 280, height: 120)
-    }
+            .padding(.bottom, 4)
 
-    private var recordingView: some View {
-        VStack(spacing: 12) {
-            // Иконка микрофона с пульсацией
-            Image(systemName: "mic.fill")
-                .font(.system(size: 32))
-                .foregroundColor(.red)
-                .scaleEffect(viewModel.pulseAnimation ? 1.2 : 1.0)
-                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: viewModel.pulseAnimation)
-                .onAppear {
-                    viewModel.pulseAnimation = true
-                }
-
-            Text("Recording...")
-                .font(.headline)
-                .foregroundColor(.primary)
-
-            Text("Release hotkey to transcribe")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            // Чистый текст без рамок и блоков
+            ScrollView {
+                Text(partialText.isEmpty ? "Говорите, после отпустите hotkey и я вставлю текст" : partialText)
+                    .font(.body)
+                    .foregroundColor(partialText.isEmpty ? .secondary.opacity(0.6) : .primary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(.easeInOut(duration: 0.2), value: partialText)
+            }
+            .frame(maxHeight: 120)
         }
     }
 
-    private var processingView: some View {
-        VStack(spacing: 12) {
-            // Крутящееся колесико
-            ProgressView()
-                .scaleEffect(1.5)
-                .progressViewStyle(CircularProgressViewStyle())
-
-            Text("Transcribing...")
-                .font(.headline)
-                .foregroundColor(.primary)
-
-            Text("Using Whisper AI")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private func successView(text: String, duration: TimeInterval) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 32))
-                .foregroundColor(.green)
-
-            Text("Success!")
-                .font(.headline)
-                .foregroundColor(.primary)
-
-            Text("\"\(text.prefix(30))\(text.count > 30 ? "..." : "")\"")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-
-            Text(String(format: "%.1fs", duration))
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private func errorView(message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 32))
-                .foregroundColor(.orange)
-
-            Text("Error")
-                .font(.headline)
-                .foregroundColor(.primary)
-
-            Text(message)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-        }
-    }
 }
 
 // MARK: - Visual Effect View для blur эффекта

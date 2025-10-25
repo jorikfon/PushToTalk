@@ -8,7 +8,7 @@ public class ModelManager: ObservableObject {
 
     @Published public var availableModels: [WhisperModel] = []
     @Published public var downloadedModels: [String] = []
-    @Published public var currentModel: String = "tiny"
+    @Published public var currentModel: String = "small"
     @Published public var isDownloading: Bool = false
     @Published public var downloadProgress: Double = 0.0
     @Published public var downloadingModel: String? = nil // Какая конкретно модель загружается
@@ -18,8 +18,6 @@ public class ModelManager: ObservableObject {
 
     // Поддерживаемые модели Whisper
     public let supportedModels: [WhisperModel] = [
-        WhisperModel(name: "tiny", displayName: "Tiny", size: "~40 MB", speed: "Fastest", accuracy: "Basic"),
-        WhisperModel(name: "base", displayName: "Base", size: "~75 MB", speed: "Fast", accuracy: "Good"),
         WhisperModel(name: "small", displayName: "Small", size: "~250 MB", speed: "Medium", accuracy: "Better"),
         WhisperModel(name: "medium", displayName: "Medium", size: "~770 MB", speed: "Slow", accuracy: "Best")
     ]
@@ -173,9 +171,9 @@ public class ModelManager: ObservableObject {
             print("ModelManager: ✓ Модель \(modelName) удалена из списка")
         }
 
-        // Если удалили текущую модель, переключаемся на tiny
+        // Если удалили текущую модель, переключаемся на small
         if currentModel == modelName {
-            saveCurrentModel("tiny")
+            saveCurrentModel("small")
         }
 
         // Пытаемся найти и удалить файлы на диске

@@ -89,6 +89,27 @@ let package = Package(
             sources: ["performance_benchmark.swift"]
         ),
 
+        // Whisper Experiment
+        .executableTarget(
+            name: "WhisperExperiment",
+            dependencies: ["PushToTalkCore"],
+            path: "Experiments/WhisperExperiment"
+        ),
+
+        // List Available Models
+        .executableTarget(
+            name: "ListModels",
+            dependencies: ["PushToTalkCore"],
+            path: "Experiments/ListModels"
+        ),
+
+        // Model Comparison
+        .executableTarget(
+            name: "ModelComparison",
+            dependencies: ["PushToTalkCore"],
+            path: "Experiments/ModelComparison"
+        ),
+
         // Unit тесты
         .testTarget(
             name: "PushToTalkSwiftTests",

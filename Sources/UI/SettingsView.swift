@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// SwiftUI view для настроек приложения
+/// SwiftUI view для настроек приложения (старая версия, оставлена для совместимости)
 struct SettingsView: View {
     @ObservedObject var controller: MenuBarController
 
@@ -18,12 +18,11 @@ struct SettingsView: View {
                     .font(.subheadline)
 
                 Picker("", selection: $controller.modelSize) {
-                    Text("Tiny (fastest)").tag("tiny")
-                    Text("Base").tag("base")
-                    Text("Small (accurate)").tag("small")
+                    Text("Small").tag("small")
+                    Text("Medium (most accurate)").tag("medium")
                 }
                 .pickerStyle(.segmented)
-                .help("Tiny: самая быстрая, Base: баланс, Small: самая точная")
+                .help("Small: быстрая, Medium: самая точная")
             }
 
             // Индикатор записи
@@ -69,5 +68,35 @@ struct SettingsView: View {
         }
         .padding()
         .frame(width: 300, height: 250)
+    }
+}
+
+// MARK: - Glass Container Modifier
+
+/// Модификатор для создания стеклянного контейнера в стиле Liquid Glass
+struct GlassContainer: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .padding(16)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.white.opacity(0.15),
+                                    Color.white.opacity(0.05)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+                }
+            )
     }
 }

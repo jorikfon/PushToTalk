@@ -15,6 +15,12 @@ public class NotificationManager: NSObject {
 
     /// Запрос разрешения на отправку уведомлений
     public func requestPermission() async -> Bool {
+        // Проверяем что bundle доступен
+        guard Bundle.main.bundleIdentifier != nil else {
+            print("NotificationManager: ⚠️ Bundle недоступен, пропускаем запрос разрешений")
+            return false
+        }
+
         do {
             let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
             await MainActor.run {
@@ -135,6 +141,12 @@ public class NotificationManager: NSObject {
 
     /// Настройка категорий уведомлений
     public func setupNotificationCategories() {
+        // Проверяем что bundle доступен (защита от краша при запуске через командную строку)
+        guard Bundle.main.bundleIdentifier != nil else {
+            print("NotificationManager: ⚠️ Bundle недоступен, пропускаем настройку уведомлений")
+            return
+        }
+
         let transcriptionCategory = UNNotificationCategory(
             identifier: "TRANSCRIPTION",
             actions: [],

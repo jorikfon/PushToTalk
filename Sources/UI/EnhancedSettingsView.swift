@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Расширенный SwiftUI view для настроек приложения
 /// Включает: модели, горячие клавиши, история транскрипций
@@ -19,37 +20,104 @@ struct EnhancedSettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            headerView
+        ZStack {
+            // Liquid Glass Background
+            ZStack {
+                // Основной blur
+                VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
 
-            Divider()
+                // Градиентный overlay для стеклянного эффекта
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.white.opacity(0.25),
+                        Color.white.opacity(0.1),
+                        Color.white.opacity(0.15)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .blendMode(.overlay)
 
-            // Tab selector
-            Picker("", selection: $selectedTab) {
-                Text("Models").tag(Tab.models)
-                Text("Hotkeys").tag(Tab.hotkeys)
-                Text("History").tag(Tab.history)
+                // Тонкая граница
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.6),
+                                Color.white.opacity(0.2),
+                                Color.white.opacity(0.4)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
             }
-            .pickerStyle(.segmented)
-            .padding()
+            .cornerRadius(20)
+            .shadow(color: .black.opacity(0.15), radius: 15, x: 0, y: 5)
 
-            // Content based on selected tab
-            Group {
-                switch selectedTab {
-                case .models:
-                    modelsView
-                case .hotkeys:
-                    hotkeysView
-                case .history:
-                    historyView
+            // Content
+            VStack(spacing: 0) {
+                // Header
+                headerView
+
+                // Glass divider
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.0),
+                                Color.white.opacity(0.3),
+                                Color.white.opacity(0.0)
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 1)
+                    .padding(.horizontal)
+
+                // Tab selector
+                Picker("", selection: $selectedTab) {
+                    Label("Models", systemImage: "cpu").tag(Tab.models)
+                    Label("Hotkeys", systemImage: "keyboard").tag(Tab.hotkeys)
+                    Label("History", systemImage: "clock.fill").tag(Tab.history)
                 }
+                .pickerStyle(.segmented)
+                .padding()
+
+                // Content based on selected tab
+                Group {
+                    switch selectedTab {
+                    case .models:
+                        modelsView
+                    case .hotkeys:
+                        hotkeysView
+                    case .history:
+                        historyView
+                    }
+                }
+
+                // Glass divider
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.0),
+                                Color.white.opacity(0.3),
+                                Color.white.opacity(0.0)
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 1)
+                    .padding(.horizontal)
+
+                // Footer
+                footerView
             }
-
-            Divider()
-
-            // Footer
-            footerView
+            .padding(20)
         }
         .frame(width: 500, height: 600)
         .alert("Delete Model", isPresented: $showingDeleteAlert) {
@@ -72,28 +140,88 @@ struct EnhancedSettingsView: View {
     // MARK: - Header
 
     private var headerView: some View {
-        HStack {
-            Image(systemName: "waveform.circle.fill")
-                .font(.title2)
-                .foregroundColor(.blue)
+        HStack(spacing: 12) {
+            // Animated gradient icon
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            gradient: Gradient(colors: [
+                                Color.blue.opacity(0.3),
+                                Color.purple.opacity(0.2),
+                                Color.clear
+                            ]),
+                            center: .center,
+                            startRadius: 5,
+                            endRadius: 25
+                        )
+                    )
+                    .frame(width: 50, height: 50)
 
-            Text("PushToTalk Settings")
-                .font(.headline)
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(
+                        LinearGradient(
+                            gradient: Gradient(colors: [.blue, .purple]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: .blue.opacity(0.5), radius: 8, x: 0, y: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("PushToTalk Settings")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
+
+                Text("AI Voice Assistant")
+                    .font(.caption)
+                    .foregroundColor(.secondary.opacity(0.8))
+            }
 
             Spacer()
 
+            // Recording indicator
             if controller.isRecording {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    gradient: Gradient(colors: [
+                                        Color.red.opacity(0.4),
+                                        Color.red.opacity(0.2),
+                                        Color.clear
+                                    ]),
+                                    center: .center,
+                                    startRadius: 3,
+                                    endRadius: 15
+                                )
+                            )
+                            .frame(width: 30, height: 30)
+
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                    }
+
                     Text("Recording")
                         .font(.caption)
+                        .fontWeight(.medium)
                         .foregroundColor(.red)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(Color.red.opacity(0.1))
+                )
             }
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Models View
