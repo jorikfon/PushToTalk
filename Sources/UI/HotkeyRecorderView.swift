@@ -1,14 +1,14 @@
 import SwiftUI
-import Carbon
 import AppKit
 
 /// View для записи произвольной комбинации клавиш
-/// Пользователь кликает в поле и нажимает желаемую комбинацию
+/// Поддерживает любые комбинации клавиш с модификаторами (Cmd, Shift, Option, Control)
 public struct HotkeyRecorderView: View {
     @Binding var hotkey: Hotkey?
     @State private var isRecording: Bool = false
     @State private var recordedKeyCombo: String = "Click to record..."
-    @State private var eventMonitor: Any?
+    @State private var localMonitor: Any?
+    @State private var globalMonitor: Any?
 
     public init(hotkey: Binding<Hotkey?>) {
         self._hotkey = hotkey
@@ -16,7 +16,7 @@ public struct HotkeyRecorderView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Press any key combination:")
+            Text("Нажмите любую комбинацию клавиш:")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
@@ -66,9 +66,9 @@ public struct HotkeyRecorderView: View {
                 }
             }
 
-            Text("Tip: Press Esc to cancel recording")
+            Text("Совет: ESC для отмены. Используйте модификаторы (⌘⌥⌃⇧) для более сложных комбинаций.")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundColor(.orange)
         }
         .onAppear {
             if let currentHotkey = hotkey {
@@ -84,19 +84,36 @@ public struct HotkeyRecorderView: View {
         isRecording = true
         recordedKeyCombo = "Press any key..."
 
-        // Создаём локальный event monitor для перехвата клавиш
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+        // Создаём локальный event monitor для перехвата клавиш в нашем окне
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             self.handleKeyEvent(event)
-            // Возвращаем nil чтобы не пропускать event дальше
+            // Возвращаем nil чтобы заблокировать событие в приложении
             return nil
+        }
+
+        // Создаём глобальный event monitor чтобы БЛОКИРОВАТЬ F-клавиши для системы
+        // Это предотвратит появление Emoji picker
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
+            // Если это F13-F19, просто игнорируем
+            // (система не получит событие и не покажет Emoji picker)
+            let fKeyCodes: Set<UInt16> = [105, 107, 113, 106, 64, 79, 80] // F13-F19
+            if fKeyCodes.contains(event.keyCode) {
+                // Событие заблокировано для системы
+            }
         }
     }
 
     private func stopRecording() {
         isRecording = false
-        if let monitor = eventMonitor {
+
+        if let monitor = localMonitor {
             NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
+            localMonitor = nil
+        }
+
+        if let monitor = globalMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalMonitor = nil
         }
     }
 
@@ -108,61 +125,47 @@ public struct HotkeyRecorderView: View {
             return
         }
 
-        var modifiers: [String] = []
-        var keyName = ""
-
-        // Обрабатываем modifier flags
-        let modifierFlags = event.modifierFlags
-
-        if modifierFlags.contains(.control) {
-            modifiers.append("⌃")
-        }
-        if modifierFlags.contains(.option) {
-            modifiers.append("⌥")
-        }
-        if modifierFlags.contains(.shift) {
-            modifiers.append("⇧")
-        }
-        if modifierFlags.contains(.command) {
-            modifiers.append("⌘")
-        }
-
-        // Обрабатываем основную клавишу
         let keyCode = event.keyCode
 
-        // Функциональные клавиши (F1-F19)
-        if let functionKey = getFunctionKeyName(keyCode) {
-            keyName = functionKey
-        }
-        // Буквы и цифры
-        else if let characters = event.charactersIgnoringModifiers, !characters.isEmpty {
-            keyName = characters.uppercased()
-        }
-        // Специальные клавиши
-        else if let specialKey = getSpecialKeyName(keyCode) {
-            keyName = specialKey
-        }
-
-        // Формируем display name
-        var displayName = modifiers.joined() + (keyName.isEmpty ? "" : keyName)
-
-        // Если только modifiers (например, Control + Command без основной клавиши)
-        if keyName.isEmpty && !modifiers.isEmpty {
-            displayName = modifiers.joined() + " (incomplete)"
-            recordedKeyCombo = displayName
+        // Игнорируем чисто modifier keys (Command, Shift, Option, Control)
+        let modifierOnlyKeys: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62]
+        if modifierOnlyKeys.contains(keyCode) {
+            recordedKeyCombo = "⚠️ Добавьте основную клавишу к модификатору"
             return
         }
 
-        // Если нет основной клавиши - игнорируем
-        if keyName.isEmpty {
+        // Получаем модификаторы
+        let modifiers = extractModifiers(from: event.modifierFlags)
+
+        // Получаем название клавиши
+        let keyName = keyCode.displayName
+
+        // Создаём display name с модификаторами
+        var displayName = ""
+        if !modifiers.isEmpty {
+            displayName = modifiers.displayName + " "
+        }
+        displayName += keyName
+
+        // Проверяем опасные комбинации
+        if isDangerousCombination(keyCode: keyCode, modifiers: modifiers) {
+            recordedKeyCombo = "⚠️ Системная комбинация запрещена"
+
+            // Через секунду возвращаем старое значение
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if self.isRecording {
+                    self.recordedKeyCombo = "Press any key..."
+                }
+            }
             return
         }
 
         // Создаём hotkey
         let newHotkey = Hotkey(
-            name: "\(modifiers.joined())\(keyName)",
+            name: displayName,
             keyCode: keyCode,
-            displayName: displayName
+            displayName: displayName,
+            modifiers: modifiers
         )
 
         // Сохраняем
@@ -175,58 +178,46 @@ public struct HotkeyRecorderView: View {
         }
     }
 
-    /// Получить название функциональной клавиши
-    private func getFunctionKeyName(_ keyCode: UInt16) -> String? {
-        switch keyCode {
-        case 122: return "F1"
-        case 120: return "F2"
-        case 99: return "F3"
-        case 118: return "F4"
-        case 96: return "F5"
-        case 97: return "F6"
-        case 98: return "F7"
-        case 100: return "F8"
-        case 101: return "F9"
-        case 109: return "F10"
-        case 103: return "F11"
-        case 111: return "F12"
-        case 105: return "F13"
-        case 107: return "F14"
-        case 113: return "F15"
-        case 106: return "F16"
-        case 64: return "F17"
-        case 79: return "F18"
-        case 80: return "F19"
-        default: return nil
+    /// Извлечение модификаторов из NSEvent.modifierFlags
+    private func extractModifiers(from flags: NSEvent.ModifierFlags) -> CGEventFlags {
+        var modifiers: CGEventFlags = []
+
+        if flags.contains(.command) {
+            modifiers.insert(.maskCommand)
         }
+        if flags.contains(.shift) {
+            modifiers.insert(.maskShift)
+        }
+        if flags.contains(.option) {
+            modifiers.insert(.maskAlternate)
+        }
+        if flags.contains(.control) {
+            modifiers.insert(.maskControl)
+        }
+
+        return modifiers
     }
 
-    /// Получить название специальной клавиши
-    private func getSpecialKeyName(_ keyCode: UInt16) -> String? {
-        switch keyCode {
-        case 36: return "Return"
-        case 48: return "Tab"
-        case 49: return "Space"
-        case 51: return "Delete"
-        case 117: return "Forward Delete"
-        case 53: return "Escape"
-        case 123: return "←"
-        case 124: return "→"
-        case 125: return "↓"
-        case 126: return "↑"
-        case 115: return "Home"
-        case 119: return "End"
-        case 116: return "Page Up"
-        case 121: return "Page Down"
-        case 71: return "Clear"
-        default: return nil
+    /// Проверка опасных системных комбинаций
+    private func isDangerousCombination(keyCode: UInt16, modifiers: CGEventFlags) -> Bool {
+        // Запрещаем Cmd+Q, Cmd+W, Cmd+Tab
+        let dangerousKeyCodes: Set<UInt16> = [
+            12,  // Q (Cmd+Q = Quit)
+            13,  // W (Cmd+W = Close window)
+            48,  // Tab (Cmd+Tab = App switcher)
+        ]
+
+        if modifiers.contains(.maskCommand) && dangerousKeyCodes.contains(keyCode) {
+            return true
         }
+
+        return false
     }
 }
 
 /// Preview provider
 struct HotkeyRecorderView_Previews: PreviewProvider {
-    @State static var testHotkey: Hotkey? = Hotkey(name: "F16", keyCode: 106, displayName: "F16")
+    @State static var testHotkey: Hotkey? = Hotkey(name: "F16", keyCode: 106, displayName: "F16", modifiers: [])
 
     static var previews: some View {
         VStack {

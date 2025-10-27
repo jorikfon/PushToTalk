@@ -12,6 +12,8 @@ public class UserSettings {
         static let transcriptionPrompt = "transcriptionPrompt"
         static let useProgrammingPrompt = "useProgrammingPrompt"
         static let transcriptionLanguage = "transcriptionLanguage"
+        static let stopWords = "stopWords"
+        static let maxRecordingDuration = "maxRecordingDuration"
     }
 
     // Встроенный промпт для программирования (русский + английский)
@@ -92,10 +94,68 @@ Metal, GPU, CPU, memory, cache, buffer, thread, async, sync, framework, library.
         return useProgrammingPrompt || !customPrompt.isEmpty
     }
 
+    // MARK: - Recording Duration Settings
+
+    /// Максимальная длительность записи в секундах (по умолчанию 60 секунд = 1 минута)
+    public var maxRecordingDuration: TimeInterval {
+        get {
+            let saved = defaults.double(forKey: Keys.maxRecordingDuration)
+            return saved > 0 ? saved : 60.0  // По умолчанию 60 секунд
+        }
+        set {
+            defaults.set(newValue, forKey: Keys.maxRecordingDuration)
+            LogManager.app.info("Максимальная длительность записи: \(Int(newValue))с")
+        }
+    }
+
+    // MARK: - Stop Words Settings
+
+    /// Список стоп-слов (по умолчанию только "отмена")
+    public var stopWords: [String] {
+        get {
+            if let saved = defaults.array(forKey: Keys.stopWords) as? [String] {
+                return saved
+            }
+            // По умолчанию только "отмена"
+            return ["отмена"]
+        }
+        set {
+            defaults.set(newValue, forKey: Keys.stopWords)
+            LogManager.app.info("Стоп-слова обновлены: \(newValue.joined(separator: ", "))")
+        }
+    }
+
+    /// Добавить стоп-слово
+    public func addStopWord(_ word: String) {
+        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return }
+
+        var current = stopWords
+        if !current.contains(trimmed) {
+            current.append(trimmed)
+            stopWords = current
+        }
+    }
+
+    /// Удалить стоп-слово
+    public func removeStopWord(_ word: String) {
+        var current = stopWords
+        current.removeAll { $0.lowercased() == word.lowercased() }
+        stopWords = current
+    }
+
+    /// Проверить, содержит ли текст стоп-слово
+    public func containsStopWord(_ text: String) -> Bool {
+        let lowercasedText = text.lowercased()
+        return stopWords.contains { lowercasedText.contains($0.lowercased()) }
+    }
+
     /// Очистить все настройки
     public func reset() {
         customPrompt = ""
         useProgrammingPrompt = true
+        stopWords = ["отмена"]
+        maxRecordingDuration = 60.0
         LogManager.app.info("Настройки сброшены")
     }
 }

@@ -58,6 +58,10 @@ public class FloatingRecordingWindow: NSWindow {
             // Сразу показываем окно с подсказкой (пустой текст)
             self.viewModel.updateState(.recordingWithText(partialText: ""))
 
+            // Обновляем название аудиоустройства
+            let deviceName = AudioDeviceManager.shared.selectedDevice?.name ?? "Default Microphone"
+            self.viewModel.updateAudioDevice(deviceName)
+
             // Показываем окно с fade-in анимацией
             self.alphaValue = 0
             self.makeKeyAndOrderFront(nil)
@@ -124,12 +128,9 @@ public class FloatingRecordingWindow: NSWindow {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.3
-                self.animator().alphaValue = 0
-            }, completionHandler: {
-                self.orderOut(nil)
-            })
+            // Мгновенно скрываем окно без анимации
+            self.orderOut(nil)
+            self.alphaValue = 0
 
             LogManager.app.debug("FloatingRecordingWindow: скрыто")
         }
@@ -141,6 +142,7 @@ public class FloatingRecordingWindow: NSWindow {
 class RecordingViewModel: ObservableObject {
     @Published var state: RecordingState = .recording
     @Published var pulseAnimation = false
+    @Published var audioDeviceName: String = ""
 
     func updateState(_ newState: RecordingState) {
         state = newState
@@ -151,6 +153,10 @@ class RecordingViewModel: ObservableObject {
                 self?.pulseAnimation = true
             }
         }
+    }
+
+    func updateAudioDevice(_ deviceName: String) {
+        audioDeviceName = deviceName
     }
 }
 
@@ -279,7 +285,7 @@ struct RecordingStatusView: View {
     /// Вид с текстом транскрипции
     private func textTranscriptionView(partialText: String) -> some View {
         VStack(spacing: 12) {
-            // Маленький микрофон сверху
+            // Маленький микрофон сверху с названием устройства
             HStack {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 16, weight: .medium))
@@ -297,6 +303,12 @@ struct RecordingStatusView: View {
                     .scaleEffect(viewModel.pulseAnimation ? 1.2 : 0.8)
                     .opacity(viewModel.pulseAnimation ? 1.0 : 0.5)
                     .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: viewModel.pulseAnimation)
+
+                if !viewModel.audioDeviceName.isEmpty {
+                    Text(viewModel.audioDeviceName)
+                        .font(.caption)
+                        .foregroundColor(.secondary.opacity(0.7))
+                }
 
                 Spacer()
             }

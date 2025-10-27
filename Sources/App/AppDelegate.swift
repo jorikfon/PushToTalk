@@ -16,10 +16,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Менеджеры
     private let audioDuckingManager = AudioDuckingManager.shared
     private let audioDeviceManager = AudioDeviceManager.shared
+    private let micVolumeManager = MicrophoneVolumeManager.shared
 
     // Real-time транскрипция
     private var partialTranscriptionText: String = ""
     private var isTranscribingChunk = false  // Флаг для предотвращения параллельных транскрипций
+
+    // Таймер для автоматической остановки записи
+    private var recordingTimer: Timer?
+    private var recordingStartTime: Date?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         LogManager.app.info("=== PushToTalk Starting ===")
@@ -114,6 +119,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 PermissionManager.shared.showPermissionInstructions(for: .microphone)
             )
         }
+
+        if !status.accessibility {
+            LogManager.app.failure("Accessibility не разрешен", message: "Требуется для CGEventTap")
+
+            // Запрашиваем разрешение Accessibility
+            PermissionManager.shared.requestAccessibilityPermission()
+
+            menuBarController?.showError(
+                PermissionManager.shared.showPermissionInstructions(for: .accessibility)
+            )
+        }
     }
 
     /// Настройка системы уведомлений
@@ -195,10 +211,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Приглушаем системную музыку
             audioDuckingManager.duck()
 
+            // Повышаем громкость микрофона до максимума
+            micVolumeManager.boostMicrophoneVolume()
+
             try audioService?.startRecording()
             menuBarController?.updateIcon(recording: true)
             floatingWindow?.showRecording()  // Показываем всплывающее окно
             SoundManager.shared.play(.recordingStarted)
+
+            // Запускаем таймер для автоматической остановки
+            recordingStartTime = Date()
+            startRecordingTimer()
+
             LogManager.app.success("Запись начата")
         } catch {
             LogManager.app.failure("Начало записи", error: error)
@@ -209,8 +233,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             menuBarController?.showError(errorMessage)
 
-            // Восстанавливаем музыку при ошибке
+            // Восстанавливаем музыку и громкость микрофона при ошибке
             audioDuckingManager.unduck()
+            micVolumeManager.restoreMicrophoneVolume()
 
             // Звук + уведомление об ошибке записи
             NotificationManager.shared.notifyError(
@@ -238,9 +263,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let fullText = try await whisperService?.transcribeChunk(audioSamples: chunk) ?? ""
 
                 if !fullText.isEmpty {
-                    // Проверяем на стоп-слово "отмена"
-                    if fullText.lowercased().contains("отмена") {
-                        LogManager.app.info("🛑 Обнаружено стоп-слово 'отмена' - сброс буфера")
+                    // Проверяем на стоп-слова (включая "отмена")
+                    if UserSettings.shared.containsStopWord(fullText) {
+                        LogManager.app.info("🛑 Обнаружено стоп-слово - сброс буфера")
 
                         await MainActor.run {
                             // Сбрасываем буфер аудио
@@ -253,6 +278,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             floatingWindow?.updatePartialTranscription("")
 
                             // Звуковой сигнал об отмене
+                            SoundManager.shared.play(.recordingStopped)
+                        }
+                    } else if UserSettings.shared.containsStopWord(fullText) {
+                        // Проверка на другие стоп-слова
+                        LogManager.app.info("🛑 Обнаружено стоп-слово - сброс буфера")
+
+                        await MainActor.run {
+                            audioService?.clearBuffer()
+                            partialTranscriptionText = ""
+                            floatingWindow?.updatePartialTranscription("")
                             SoundManager.shared.play(.recordingStopped)
                         }
                     } else {
@@ -279,19 +314,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hotkey = HotkeyManager.shared.currentHotkey.displayName
         LogManager.app.info("=== \(hotkey) Released ===")
 
+        // Останавливаем таймер
+        stopRecordingTimer()
+
         guard let audioData = audioService?.stopRecording() else {
             LogManager.app.failure("Остановка записи", message: "Нет аудио данных")
             // Восстанавливаем музыку при ошибке
             audioDuckingManager.unduck()
+            floatingWindow?.hide()  // Закрываем окно при ошибке
             return
         }
 
         menuBarController?.updateIcon(recording: false)
         SoundManager.shared.play(.recordingStopped)
 
+        // Сразу скрываем окно после отпускания кнопки
+        floatingWindow?.hide()
+
         // Показываем состояние обработки
         menuBarController?.updateProcessingState(true)
-        floatingWindow?.showProcessing()  // Обновляем floating window
 
         // Запускаем транскрипцию асинхронно
         Task {
@@ -303,6 +344,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func performTranscription(audioData: [Float]) async {
         let startTime = Date()
 
+        // Проверка на тишину
+        if SilenceDetector.shared.isSilence(audioData) {
+            LogManager.transcription.info("🔇 Обнаружена тишина, транскрипция пропущена")
+
+            await MainActor.run {
+                menuBarController?.updateProcessingState(false)
+                floatingWindow?.showError("No speech detected (silence)")
+                SoundManager.shared.play(.transcriptionError)
+                audioDuckingManager.unduck()
+                micVolumeManager.restoreMicrophoneVolume()
+
+                NotificationManager.shared.notifyError(
+                    message: "No speech detected (silence)",
+                    playSound: false
+                )
+            }
+            return
+        }
+
         do {
             LogManager.transcription.begin("Транскрипция")
 
@@ -311,9 +371,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             let duration = Date().timeIntervalSince(startTime)
 
-            // Проверяем на стоп-слово "отмена"
-            if transcription.lowercased().contains("отмена") {
-                LogManager.transcription.info("🛑 Обнаружено стоп-слово 'отмена' - текст не вставлен")
+            // Проверяем на стоп-слова
+            if UserSettings.shared.containsStopWord(transcription) {
+                LogManager.transcription.info("🛑 Обнаружено стоп-слово - текст не вставлен")
 
                 await MainActor.run {
                     // Убираем иконку обработки
@@ -321,6 +381,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     floatingWindow?.hide()  // Просто закрываем окно
                     SoundManager.shared.play(.recordingStopped)  // Звук отмены
                     audioDuckingManager.unduck()
+                    micVolumeManager.restoreMicrophoneVolume()
                 }
                 return
             }
@@ -335,11 +396,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // Добавляем в историю
                     TranscriptionHistory.shared.addTranscription(transcription, duration: duration)
 
-                    // Успех: убираем иконку обработки, воспроизводим звук, восстанавливаем музыку
+                    // Успех: убираем иконку обработки, воспроизводим звук, восстанавливаем музыку и микрофон
                     menuBarController?.updateProcessingState(false)
                     floatingWindow?.showResult(transcription, duration: duration)  // Показываем результат
                     SoundManager.shared.play(.transcriptionSuccess)
                     audioDuckingManager.unduck()
+                    micVolumeManager.restoreMicrophoneVolume()
 
                     // Уведомление об успехе
                     NotificationManager.shared.notifyTranscriptionSuccess(
@@ -351,11 +413,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 LogManager.transcription.failure("Транскрипция", message: "Пустой результат")
                 await MainActor.run {
-                    // Ошибка: убираем иконку обработки, воспроизводим звук ошибки, восстанавливаем музыку
+                    // Ошибка: убираем иконку обработки, воспроизводим звук ошибки, восстанавливаем музыку и микрофон
                     menuBarController?.updateProcessingState(false)
                     floatingWindow?.showError("No speech detected")  // Показываем ошибку
                     SoundManager.shared.play(.transcriptionError)
                     audioDuckingManager.unduck()
+                    micVolumeManager.restoreMicrophoneVolume()
 
                     // Уведомление об ошибке
                     NotificationManager.shared.notifyError(
@@ -368,11 +431,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             LogManager.transcription.failure("Транскрипция", error: error)
             let errorMessage = "Transcription failed: \(error.localizedDescription)"
             await MainActor.run {
-                // Ошибка: убираем иконку обработки, воспроизводим звук ошибки, восстанавливаем музыку
+                // Ошибка: убираем иконку обработки, воспроизводим звук ошибки, восстанавливаем музыку и микрофон
                 menuBarController?.updateProcessingState(false)
                 floatingWindow?.showError(errorMessage)  // Показываем ошибку
                 SoundManager.shared.play(.transcriptionError)
                 audioDuckingManager.unduck()
+                micVolumeManager.restoreMicrophoneVolume()
 
                 menuBarController?.showError(errorMessage)
 
@@ -399,10 +463,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         handleHotkeyRelease()
     }
 
+    // MARK: - Recording Timer
+
+    /// Запуск таймера для автоматической остановки записи
+    private func startRecordingTimer() {
+        let maxDuration = UserSettings.shared.maxRecordingDuration
+
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: maxDuration, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+
+            LogManager.app.info("⏱️ Достигнута максимальная длительность записи (\(Int(maxDuration))s), автоматическая остановка")
+
+            // Останавливаем запись автоматически
+            self.handleHotkeyRelease()
+
+            // Показываем уведомление пользователю
+            DispatchQueue.main.async {
+                NotificationManager.shared.showInfoNotification(
+                    title: "Запись остановлена",
+                    message: "Достигнута максимальная длительность записи (\(Int(maxDuration))s)"
+                )
+            }
+        }
+
+        LogManager.app.debug("Таймер записи запущен: \(Int(maxDuration))s")
+    }
+
+    /// Остановка таймера записи
+    private func stopRecordingTimer() {
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+
+        if let startTime = recordingStartTime {
+            let duration = Date().timeIntervalSince(startTime)
+            LogManager.app.debug("Запись остановлена вручную после \(String(format: "%.1f", duration))s")
+        }
+
+        recordingStartTime = nil
+    }
+
     // MARK: - Cleanup
 
     func applicationWillTerminate(_ notification: Notification) {
         LogManager.app.info("=== PushToTalk Terminating ===")
+        stopRecordingTimer()
         keyboardMonitor?.stopMonitoring()
     }
 }

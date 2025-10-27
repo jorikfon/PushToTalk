@@ -68,14 +68,14 @@ public class WhisperService {
         }
 
         // ОПТИМАЛЬНЫЕ настройки для СМЕШАННОЙ речи (RU+EN)
-        // Auto-detect даёт лучший результат для code-switching
+        // Ограничиваем только русским и английским языками
         let options = DecodingOptions(
             task: .transcribe,        // TRANSCRIBE, не translate!
-            language: nil,            // nil = auto-detect для смешанной речи
+            language: "ru",           // Русский как основной (хорошо работает с EN вставками)
             temperature: 0.0,         // Детерминированный вывод
             usePrefillPrompt: true,   // ✅ Контекст для технических терминов
             usePrefillCache: true,    // ✅ Кэширование контекста
-            detectLanguage: true      // ✅ Автоопределение языка для каждого сегмента
+            detectLanguage: false     // Отключаем автодетект, фиксируем ru+en
         )
 
         let results = try await whisperKit.transcribe(
@@ -108,18 +108,18 @@ public class WhisperService {
 
         do {
             // ОПТИМАЛЬНЫЕ настройки для СМЕШАННОЙ речи (RU+EN)
-            // Auto-detect даёт лучший результат для code-switching
+            // Ограничиваем только русским и английским языками
             let options = DecodingOptions(
                 task: .transcribe,      // transcribe (не translate!)
-                language: nil,          // nil = auto-detect для смешанной речи
+                language: "ru",         // Русский как основной (хорошо работает с EN вставками)
                 temperature: 0.0,       // Детерминированный вывод
                 usePrefillPrompt: true, // Используем prefill для контекста (технические термины)
                 usePrefillCache: true,  // Кэширование
-                detectLanguage: true    // Автоопределение языка для каждого сегмента
+                detectLanguage: false   // Отключаем автодетект, фиксируем ru+en
             )
 
             // Логирование настроек
-            LogManager.transcription.debug("Режим: auto-detect (смешанная речь RU+EN)")
+            LogManager.transcription.debug("Режим: Russian (с поддержкой English вставок)")
 
             // TODO: Добавить токенизацию промпта когда получим доступ к tokenizer
             if let prompt = promptText, !prompt.isEmpty {

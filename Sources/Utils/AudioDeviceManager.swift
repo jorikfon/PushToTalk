@@ -15,7 +15,7 @@ public class AudioDeviceManager: ObservableObject {
     private init() {
         print("AudioDeviceManager: Инициализация")
         scanAvailableDevices()
-        loadSelectedDevice()
+        // loadSelectedDevice() вызывается в scanAvailableDevices() после заполнения списка
     }
 
     /// Сканирование доступных устройств записи
@@ -77,9 +77,13 @@ public class AudioDeviceManager: ObservableObject {
                 print("  - \(device.name) (UID: \(device.uid))")
             }
 
+            // Загружаем сохранённое устройство после того, как список заполнен
+            self.loadSelectedDevice()
+
             // Если нет выбранного устройства, выбираем первое
             if self.selectedDevice == nil && !devices.isEmpty {
                 self.selectedDevice = devices.first
+                print("AudioDeviceManager: Выбрано устройство по умолчанию: \(devices.first!.name)")
             }
         }
     }
@@ -195,7 +199,7 @@ public class AudioDeviceManager: ObservableObject {
 }
 
 /// Структура представляющая аудио устройство
-public struct AudioDevice: Identifiable, Codable, Equatable {
+public struct AudioDevice: Identifiable, Codable, Equatable, Hashable {
     public let id: AudioDeviceID
     public let name: String
     public let uid: String
@@ -207,6 +211,11 @@ public struct AudioDevice: Identifiable, Codable, Equatable {
     // Реализация Equatable
     public static func == (lhs: AudioDevice, rhs: AudioDevice) -> Bool {
         return lhs.uid == rhs.uid
+    }
+
+    // Реализация Hashable
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(uid)
     }
 }
 

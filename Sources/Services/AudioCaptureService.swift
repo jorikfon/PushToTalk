@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CoreAudio
 
 /// Сервис для захвата аудио с микрофона
 /// Использует AVAudioEngine для низколатентной записи в формате 16kHz mono
@@ -57,6 +58,14 @@ public class AudioCaptureService: ObservableObject {
             LogManager.audio.info("Audio engine уже запущен, останавливаем")
             audioEngine.stop()
             audioEngine.inputNode.removeTap(onBus: 0)
+        }
+
+        // Устанавливаем выбранное пользователем устройство
+        if let selectedDevice = AudioDeviceManager.shared.getSelectedDeviceOrDefault() {
+            setAudioInputDevice(selectedDevice)
+            LogManager.audio.info("Используем устройство: \(selectedDevice.name)")
+        } else {
+            LogManager.audio.warning("Не удалось получить аудио устройство, используем системное по умолчанию")
         }
 
         audioBuffer.removeAll()
@@ -234,6 +243,61 @@ public class AudioCaptureService: ObservableObject {
                 self?.onAudioChunkReady?(cumulativeChunk)
             }
         }
+    }
+
+    /// Установить аудио устройство для записи
+    private func setAudioInputDevice(_ device: AudioDevice) {
+        #if os(macOS)
+        // На macOS используем CoreAudio для установки входного устройства
+        var deviceUID = device.uid as CFString
+        var selector = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        // Ищем устройство по UID
+        var deviceID: AudioDeviceID = 0
+        var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
+
+        var translationAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDeviceForUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &translationAddress,
+            UInt32(MemoryLayout<CFString>.size),
+            &deviceUID,
+            &propertySize,
+            &deviceID
+        )
+
+        if status == noErr {
+            LogManager.audio.debug("Найдено устройство с ID: \(deviceID)")
+
+            // Устанавливаем как входное устройство по умолчанию
+            var mutableDeviceID = deviceID
+            let setStatus = AudioObjectSetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &selector,
+                0,
+                nil,
+                propertySize,
+                &mutableDeviceID
+            )
+
+            if setStatus == noErr {
+                LogManager.audio.success("Установлено входное устройство", details: device.name)
+            } else {
+                LogManager.audio.error("Не удалось установить входное устройство: OSStatus \(setStatus)")
+            }
+        } else {
+            LogManager.audio.error("Не удалось найти устройство по UID: OSStatus \(status)")
+        }
+        #endif
     }
 
     deinit {

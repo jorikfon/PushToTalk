@@ -59,16 +59,34 @@ public class MenuBarController: ObservableObject {
             if let button = self.statusItem?.button {
                 // Меняем иконку в зависимости от состояния
                 let iconName = recording ? "mic.fill" : "mic"
-                let iconColor: NSColor = recording ? .systemRed : .labelColor
 
-                button.image = NSImage(
-                    systemSymbolName: iconName,
-                    accessibilityDescription: recording ? "Recording" : "PushToTalk"
+                // Создаём SF Symbol с автоматической адаптацией к теме
+                let config = NSImage.SymbolConfiguration(
+                    pointSize: 14,
+                    weight: .regular
                 )
 
-                // Окрашиваем иконку
-                button.image?.isTemplate = true
-                button.contentTintColor = iconColor
+                if let image = NSImage(
+                    systemSymbolName: iconName,
+                    accessibilityDescription: recording ? "Recording" : "PushToTalk"
+                )?.withSymbolConfiguration(config) {
+
+                    // Для темной темы - белая иконка, для светлой - черная
+                    // isTemplate = true автоматически адаптирует цвет
+                    button.image = image
+                    button.image?.isTemplate = true
+
+                    // Цвет иконки: красный при записи, системный в остальных случаях
+                    if recording {
+                        button.contentTintColor = .systemRed
+                    } else {
+                        button.contentTintColor = nil  // nil = использовать системный цвет
+                    }
+                }
+
+                // ВАЖНО: Отключаем возможность открытия панели выбора эмодзи/символов
+                button.refusesFirstResponder = true
+                button.sendAction(on: [.leftMouseDown])  // Только левый клик
 
                 // Убедимся что alpha всегда 1.0 (без пульсации)
                 button.alphaValue = 1.0
@@ -85,14 +103,26 @@ public class MenuBarController: ObservableObject {
 
             if let button = self.statusItem?.button {
                 if processing {
+                    // Создаём SF Symbol с автоматической адаптацией к теме
+                    let config = NSImage.SymbolConfiguration(
+                        pointSize: 14,
+                        weight: .regular
+                    )
+
                     // Иконка обработки (синий цвет, без анимации)
-                    button.image = NSImage(
+                    if let image = NSImage(
                         systemSymbolName: "waveform.circle.fill",
                         accessibilityDescription: "Processing"
-                    )
-                    button.image?.isTemplate = true
-                    button.contentTintColor = .systemBlue
-                    button.alphaValue = 1.0
+                    )?.withSymbolConfiguration(config) {
+                        button.image = image
+                        button.image?.isTemplate = true
+                        button.contentTintColor = .systemBlue
+                        button.alphaValue = 1.0
+                    }
+
+                    // ВАЖНО: Отключаем возможность открытия панели выбора эмодзи/символов
+                    button.refusesFirstResponder = true
+                    button.sendAction(on: [.leftMouseDown])  // Только левый клик
                 } else {
                     // Возвращаем обычную иконку
                     self.updateIcon(recording: false)

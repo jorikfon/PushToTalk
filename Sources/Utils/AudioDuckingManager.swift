@@ -7,6 +7,7 @@ public class AudioDuckingManager: ObservableObject {
 
     @Published public var isDucked: Bool = false
     @Published public var duckingEnabled: Bool = true // Можно отключить в настройках
+    @Published public var muteOutputCompletely: Bool = true // Полностью выключать звук или приглушать
 
     private init() {
         print("AudioDuckingManager: Инициализация")
@@ -15,11 +16,14 @@ public class AudioDuckingManager: ObservableObject {
 
     /// Загрузка настроек из UserDefaults
     private func loadSettings() {
-        duckingEnabled = UserDefaults.standard.bool(forKey: "audioDuckingEnabled")
+        duckingEnabled = UserDefaults.standard.object(forKey: "audioDuckingEnabled") as? Bool ?? true
+        muteOutputCompletely = UserDefaults.standard.object(forKey: "muteOutputCompletely") as? Bool ?? true
+
         if UserDefaults.standard.object(forKey: "audioDuckingEnabled") == nil {
-            // По умолчанию включено
-            duckingEnabled = true
             UserDefaults.standard.set(true, forKey: "audioDuckingEnabled")
+        }
+        if UserDefaults.standard.object(forKey: "muteOutputCompletely") == nil {
+            UserDefaults.standard.set(true, forKey: "muteOutputCompletely")
         }
     }
 
@@ -30,22 +34,38 @@ public class AudioDuckingManager: ObservableObject {
         print("AudioDuckingManager: Ducking \(enabled ? "enabled" : "disabled")")
     }
 
+    /// Сохранение режима mute
+    public func saveMuteOutputCompletely(_ mute: Bool) {
+        muteOutputCompletely = mute
+        UserDefaults.standard.set(mute, forKey: "muteOutputCompletely")
+        print("AudioDuckingManager: Mute output \(mute ? "полностью" : "приглушение")")
+    }
+
     private var originalVolume: Float = 0.5
+    private var wasPlaying: Bool = false
 
     /// Приглушить системное аудио (начало записи)
     public func duck() {
         guard duckingEnabled, !isDucked else { return }
 
-        print("AudioDuckingManager: Приглушение системного аудио...")
+        print("AudioDuckingManager: \(muteOutputCompletely ? "Выключение" : "Приглушение") системного аудио...")
 
         // Сохраняем текущую громкость
         originalVolume = getSystemVolume()
 
-        // Уменьшаем громкость на 50%
-        setSystemVolume(originalVolume * 0.5)
+        if muteOutputCompletely {
+            // Полностью выключаем звук
+            setSystemVolume(0.0)
+            // ОТКЛЮЧЕНО: pausePlayback() вызывает Ctrl+Cmd+Space который открывает Emoji picker!
+            // pausePlayback()
+            print("AudioDuckingManager: ✓ Аудио выключено полностью (громкость \(Int(originalVolume * 100))% → 0%)")
+        } else {
+            // Уменьшаем громкость на 50%
+            setSystemVolume(originalVolume * 0.5)
+            print("AudioDuckingManager: ✓ Аудио приглушено (громкость \(Int(originalVolume * 100))% → \(Int(originalVolume * 50))%)")
+        }
 
         isDucked = true
-        print("AudioDuckingManager: ✓ Аудио приглушено (громкость снижена с \(Int(originalVolume * 100))% до \(Int(originalVolume * 50))%)")
     }
 
     /// Восстановить системное аудио (конец записи)
@@ -96,5 +116,26 @@ public class AudioDuckingManager: ObservableObject {
         }
 
         return nil
+    }
+
+    /// Приостановить воспроизведение музыки
+    private func pausePlayback() {
+        // Используем медиакей для остановки воспроизведения
+        let script = """
+        tell application "System Events"
+            try
+                keystroke " " using {control down, command down}
+            end try
+        end tell
+        """
+        _ = runAppleScript(script)
+        print("AudioDuckingManager: Media playback paused")
+    }
+
+    /// Возобновить воспроизведение музыки (если было активно)
+    private func resumePlayback() {
+        // Пока не реализовано автоматическое возобновление,
+        // так как не можем точно знать, было ли что-то активно
+        // Пользователь может возобновить вручную
     }
 }

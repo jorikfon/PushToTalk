@@ -43,8 +43,9 @@ public class TextInserter {
 
         LogManager.app.debug("Текст скопирован в clipboard")
 
-        // Даем время системе обработать изменение clipboard
-        usleep(50000) // 50ms
+        // ВАЖНО: Задержка перед Cmd+V чтобы система "забыла" про F16
+        // Иначе F16 + Cmd может интерпретироваться как системный шорткат (Emoji picker)
+        usleep(200000) // 200ms задержка для сброса состояния клавиатуры
 
         // Симулируем Cmd+V
         simulatePaste()

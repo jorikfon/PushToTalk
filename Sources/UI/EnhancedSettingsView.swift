@@ -8,6 +8,7 @@ struct EnhancedSettingsView: View {
     @ObservedObject var modelManager = ModelManager.shared
     @ObservedObject var hotkeyManager = HotkeyManager.shared
     @ObservedObject var history = TranscriptionHistory.shared
+    @ObservedObject var audioDeviceManager = AudioDeviceManager.shared
 
     @State private var selectedTab: Tab = .models
     @State private var showingDeleteAlert = false
@@ -16,7 +17,7 @@ struct EnhancedSettingsView: View {
     @State private var isTestRecording = false
 
     enum Tab {
-        case models, hotkeys, history
+        case models, hotkeys, settings, history
     }
 
     var body: some View {
@@ -81,6 +82,7 @@ struct EnhancedSettingsView: View {
                 Picker("", selection: $selectedTab) {
                     Label("Models", systemImage: "cpu").tag(Tab.models)
                     Label("Hotkeys", systemImage: "keyboard").tag(Tab.hotkeys)
+                    Label("Settings", systemImage: "gearshape").tag(Tab.settings)
                     Label("History", systemImage: "clock.fill").tag(Tab.history)
                 }
                 .pickerStyle(.segmented)
@@ -93,6 +95,8 @@ struct EnhancedSettingsView: View {
                         modelsView
                     case .hotkeys:
                         hotkeysView
+                    case .settings:
+                        settingsView
                     case .history:
                         historyView
                     }
@@ -364,21 +368,49 @@ struct EnhancedSettingsView: View {
     private var hotkeysView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Custom Hotkey Recorder
-                GroupBox(label: Label("Custom Hotkey", systemImage: "keyboard.badge.ellipsis").foregroundColor(.purple)) {
+                // F-Key Selector (F13-F19)
+                GroupBox(label: Label("Hotkey Selection", systemImage: "keyboard.badge.ellipsis").foregroundColor(.purple)) {
                     VStack(alignment: .leading, spacing: 12) {
-                        HotkeyRecorderView(hotkey: Binding(
-                            get: { hotkeyManager.currentHotkey },
-                            set: { newHotkey in
-                                if let hotkey = newHotkey, hotkeyManager.isValidHotkey(hotkey) {
-                                    hotkeyManager.saveHotkey(hotkey)
+                        Text("Выберите функциональную клавишу:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Picker("Hotkey", selection: Binding(
+                            get: { hotkeyManager.currentHotkey.keyCode },
+                            set: { newKeyCode in
+                                let fKeyMap: [UInt16: String] = [
+                                    105: "F13",
+                                    107: "F14",
+                                    113: "F15",
+                                    106: "F16",
+                                    64: "F17",
+                                    79: "F18",
+                                    80: "F19"
+                                ]
+                                if let name = fKeyMap[newKeyCode] {
+                                    let newHotkey = Hotkey(
+                                        name: name,
+                                        keyCode: newKeyCode,
+                                        displayName: name,
+                                        modifiers: []
+                                    )
+                                    hotkeyManager.saveHotkey(newHotkey)
                                 }
                             }
-                        ))
+                        )) {
+                            Text("F13").tag(UInt16(105))
+                            Text("F14").tag(UInt16(107))
+                            Text("F15").tag(UInt16(113))
+                            Text("F16 (Default)").tag(UInt16(106))
+                            Text("F17").tag(UInt16(64))
+                            Text("F18").tag(UInt16(79))
+                            Text("F19").tag(UInt16(80))
+                        }
+                        .pickerStyle(.menu)
 
-                        Text("⚠️ Avoid system shortcuts like ⌘Q, ⌘W, ⌘Tab")
+                        Text("💡 F13-F19 не требуют Accessibility разрешения")
                             .font(.caption2)
-                            .foregroundColor(.orange)
+                            .foregroundColor(.green)
                     }
                     .padding(8)
                 }
@@ -394,15 +426,6 @@ struct EnhancedSettingsView: View {
                         Spacer()
                     }
                     .padding(8)
-                }
-
-                // Preset hotkeys
-                Text("Quick Presets")
-                    .font(.headline)
-                    .padding(.top, 8)
-
-                ForEach(hotkeyManager.availableHotkeys) { hotkey in
-                    hotkeyRow(for: hotkey)
                 }
 
                 Divider()
@@ -423,31 +446,181 @@ struct EnhancedSettingsView: View {
         }
     }
 
-    private func hotkeyRow(for hotkey: Hotkey) -> some View {
-        let isActive = hotkeyManager.currentHotkey.keyCode == hotkey.keyCode
 
-        return Button(action: {
-            hotkeyManager.saveHotkey(hotkey)
-        }) {
-            HStack {
-                Image(systemName: hotkeyManager.isFunctionKey(hotkey) ? "command.circle" : "option.circle")
-                    .foregroundColor(isActive ? .blue : .secondary)
+    // MARK: - Settings View
 
-                Text(hotkey.displayName)
-                    .foregroundColor(.primary)
+    @State private var newStopWord: String = ""
 
-                Spacer()
+    private var settingsView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Stop Words Section
+                GroupBox(label: Label("Stop Words", systemImage: "hand.raised.fill").foregroundColor(.orange)) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Слова, при распознавании которых транскрипция будет отменена")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
 
-                if isActive {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+                        // Add new stop word
+                        HStack {
+                            TextField("Добавить стоп-слово...", text: $newStopWord)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit {
+                                    addNewStopWord()
+                                }
+
+                            Button(action: addNewStopWord) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title2)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(newStopWord.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
+                        // Current stop words
+                        if UserSettings.shared.stopWords.isEmpty {
+                            Text("Нет стоп-слов")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        } else {
+                            ForEach(UserSettings.shared.stopWords, id: \.self) { word in
+                                HStack {
+                                    Image(systemName: "exclamationmark.bubble.fill")
+                                        .foregroundColor(.orange)
+                                        .font(.caption)
+
+                                    Text(word)
+                                        .font(.body)
+
+                                    Spacer()
+
+                                    Button(action: {
+                                        UserSettings.shared.removeStopWord(word)
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.red)
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+                    .padding(8)
+                }
+
+                Divider()
+
+                // Recording Settings
+                GroupBox(label: Label("Recording Settings", systemImage: "timer").foregroundColor(.purple)) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Максимальная длительность записи (секунды)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Spacer()
+
+                            TextField("60", value: Binding(
+                                get: { Int(UserSettings.shared.maxRecordingDuration) },
+                                set: { UserSettings.shared.maxRecordingDuration = TimeInterval(max(10, min(300, $0))) }
+                            ), formatter: NumberFormatter())
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 60)
+                            .multilineTextAlignment(.center)
+                        }
+
+                        HStack(spacing: 8) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.blue)
+                                .font(.caption)
+
+                            Text("Диапазон: 10-300 секунд. Запись остановится автоматически.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(8)
+                }
+
+                Divider()
+
+                // Audio Device Selection
+                GroupBox(label: Label("Audio Input", systemImage: "mic.fill").foregroundColor(.green)) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Выбор микрофона")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        if !audioDeviceManager.availableDevices.isEmpty {
+                            Picker("Микрофон", selection: Binding(
+                                get: {
+                                    if let selected = audioDeviceManager.selectedDevice {
+                                        return selected
+                                    }
+                                    return audioDeviceManager.availableDevices.first!
+                                },
+                                set: { device in
+                                    audioDeviceManager.saveSelectedDevice(device)
+                                }
+                            )) {
+                                ForEach(audioDeviceManager.availableDevices) { device in
+                                    Text(device.displayName).tag(device)
+                                }
+                            }
+                            .labelsHidden()
+                        } else {
+                            Text("Нет доступных устройств")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                        }
+
+                        Button("Обновить список устройств") {
+                            audioDeviceManager.scanAvailableDevices()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .padding(8)
+                }
+
+                Divider()
+
+                // Audio Settings
+                GroupBox(label: Label("Audio Settings", systemImage: "speaker.wave.3").foregroundColor(.blue)) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Повышать громкость микрофона при записи", isOn: Binding(
+                            get: { MicrophoneVolumeManager.shared.volumeBoostEnabled },
+                            set: { MicrophoneVolumeManager.shared.saveVolumeBoostEnabled($0) }
+                        ))
+
+                        Toggle("Приглушать системный звук при записи", isOn: Binding(
+                            get: { AudioDuckingManager.shared.duckingEnabled },
+                            set: { AudioDuckingManager.shared.saveDuckingEnabled($0) }
+                        ))
+
+                        if AudioDuckingManager.shared.duckingEnabled {
+                            Toggle("Полностью выключать звук (вместо приглушения)", isOn: Binding(
+                                get: { AudioDuckingManager.shared.muteOutputCompletely },
+                                set: { AudioDuckingManager.shared.saveMuteOutputCompletely($0) }
+                            ))
+                            .padding(.leading, 20)
+                        }
+                    }
+                    .padding(8)
                 }
             }
-            .padding(12)
-            .background(isActive ? Color.blue.opacity(0.1) : Color.clear)
-            .cornerRadius(8)
+            .padding()
         }
-        .buttonStyle(.plain)
+    }
+
+    private func addNewStopWord() {
+        let trimmed = newStopWord.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        UserSettings.shared.addStopWord(trimmed)
+        newStopWord = ""
     }
 
     // MARK: - History View
