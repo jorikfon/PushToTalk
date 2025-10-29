@@ -72,7 +72,7 @@ public class AudioPlayerManager: ObservableObject {
         isPlaying = true
         startProgressTimer()
 
-        LogManager.app.info("Воспроизведение начато с \(currentTime)s")
+        LogManager.app.info("Воспроизведение начато с \(self.currentTime)s")
     }
 
     /// Приостанавливает воспроизведение
@@ -83,7 +83,7 @@ public class AudioPlayerManager: ObservableObject {
         isPlaying = false
         stopProgressTimer()
 
-        LogManager.app.info("Воспроизведение приостановлено на \(currentTime)s")
+        LogManager.app.info("Воспроизведение приостановлено на \(self.currentTime)s")
     }
 
     /// Останавливает воспроизведение и сбрасывает позицию

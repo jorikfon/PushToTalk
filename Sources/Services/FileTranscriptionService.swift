@@ -110,7 +110,7 @@ public class FileTranscriptionService {
     /// - Throws: Ошибки загрузки или транскрипции
     public func transcribeFileWithDialogue(at url: URL) async throws -> DialogueTranscription {
         LogManager.app.begin("Транскрипция файла с определением дикторов: \(url.lastPathComponent)")
-        LogManager.app.info("Режим транскрипции: \(mode == .batch ? "BATCH" : "VAD")")
+        LogManager.app.info("Режим транскрипции: \(self.mode == .batch ? "BATCH" : "VAD")")
 
         // Используем batch режим, если выбран
         if mode == .batch {
@@ -306,7 +306,7 @@ public class FileTranscriptionService {
 
         // Транскрибируем левый канал (Speaker 1)
         for segment in leftSegments {
-            let segmentAudio = vad.extractAudio(from: leftChannel, segment: segment)
+            let segmentAudio = vad.extractAudio(for: segment, from: leftChannel)
 
             if !SilenceDetector.shared.isSilence(segmentAudio) {
                 LogManager.app.info("Транскрибируем Speaker 1: \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s")
@@ -334,7 +334,7 @@ public class FileTranscriptionService {
 
         // Транскрибируем правый канал (Speaker 2)
         for segment in rightSegments {
-            let segmentAudio = vad.extractAudio(from: rightChannel, segment: segment)
+            let segmentAudio = vad.extractAudio(for: segment, from: rightChannel)
 
             if !SilenceDetector.shared.isSilence(segmentAudio) {
                 LogManager.app.info("Транскрибируем Speaker 2: \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s")

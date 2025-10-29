@@ -180,7 +180,7 @@ public class BatchTranscriptionService {
                     // Обновляем контекст после каждой реплики
                     contextPrompt = buildContextPrompt(from: turns)
 
-                    LogManager.app.debug("Left #\(index + 1) [\(formatTime(chunk.startTime))-\(formatTime(chunk.endTime))]: \(text.count) символов")
+                    LogManager.app.debug("Left #\(index + 1) [\(self.formatTime(chunk.startTime))-\(self.formatTime(chunk.endTime))]: \(text.count) символов")
                 }
 
                 processedChunks += 1
@@ -208,7 +208,7 @@ public class BatchTranscriptionService {
                     // Обновляем контекст после каждой реплики
                     contextPrompt = buildContextPrompt(from: turns)
 
-                    LogManager.app.debug("Right #\(index + 1) [\(formatTime(chunk.startTime))-\(formatTime(chunk.endTime))]: \(text.count) символов")
+                    LogManager.app.debug("Right #\(index + 1) [\(self.formatTime(chunk.startTime))-\(self.formatTime(chunk.endTime))]: \(text.count) символов")
                 }
 
                 processedChunks += 1
@@ -284,7 +284,7 @@ public class BatchTranscriptionService {
             }
         }
 
-        LogManager.app.info("Создано \(chunks.count) чанков по \(parameters.chunkDuration)s с перекрытием \(parameters.overlapDuration)s")
+        LogManager.app.info("Создано \(chunks.count) чанков по \(self.parameters.chunkDuration)s с перекрытием \(self.parameters.overlapDuration)s")
 
         return chunks
     }

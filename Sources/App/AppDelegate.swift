@@ -1,7 +1,6 @@
 import Cocoa
 import SwiftUI
 import PushToTalkCore
-import Sparkle
 
 /// Главный делегат приложения
 /// Управляет жизненным циклом и координирует все сервисы
@@ -23,8 +22,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let audioDeviceManager = AudioDeviceManager.shared
     private let micVolumeManager = MicrophoneVolumeManager.shared
 
-    // Sparkle updater для автоматических обновлений
-    private var updaterController: SPUStandardUpdaterController?
 
     // Real-time транскрипция
     private var partialTranscriptionText: String = ""
@@ -41,8 +38,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // НЕ устанавливаем activationPolicy, оставляем default (.regular)
         // Это позволит applicationShouldTerminateAfterLastWindowClosed работать корректно
 
-        // Инициализация Sparkle updater
-        setupSparkleUpdater()
 
         // Инициализация сервисов
         initializeServices()
@@ -58,15 +53,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Initialization
 
-    /// Инициализация Sparkle updater для автоматических обновлений
-    private func setupSparkleUpdater() {
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
-        LogManager.app.success("Sparkle updater инициализирован")
-    }
 
     /// Инициализация всех сервисов
     private func initializeServices() {
@@ -94,10 +80,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenuBar() {
         menuBarController?.setupMenuBar()
 
-        // Устанавливаем callback для проверки обновлений
-        menuBarController?.checkForUpdatesCallback = { [weak self] in
-            self?.updaterController?.updater.checkForUpdates()
-        }
 
         // Устанавливаем callback для смены модели
         menuBarController?.modelChangedCallback = { [weak self] newModelSize in
@@ -192,7 +174,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.audioService?.debugStartEngine()
+            // self?.audioService?.debugStartEngine()  // TODO: Добавить метод debugStartEngine
         }
 
         NotificationCenter.default.addObserver(
@@ -200,7 +182,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.audioService?.debugStopEngine()
+            // self?.audioService?.debugStopEngine()  // TODO: Добавить метод debugStopEngine
         }
 
         LogManager.app.info("Debug notifications настроены")
@@ -338,7 +320,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Восстанавливаем музыку и громкость микрофона при ошибке
             let device = AudioDeviceManager.shared.selectedDevice
-            audioDuckingManager.unduck(device: device)
+            audioDuckingManager.unduck()
             micVolumeManager.restoreMicrophoneVolume()
 
             // Звук + уведомление об ошибке записи
@@ -408,10 +390,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         LogManager.app.info("=== \(hotkey) Released ===")
 
         // Логируем Bluetooth профиль ПЕРЕД остановкой записи (если используется Bluetooth)
+        // TODO: Добавить проверку Bluetooth устройства когда добавим свойство isBluetooth
+        /*
         if let selectedDevice = audioDeviceManager.getSelectedDeviceOrDefault(), selectedDevice.isBluetooth {
             LogManager.app.info("📱 Bluetooth устройство ДО stopRecording: \(selectedDevice.name)")
             BluetoothProfileMonitor.shared.logCurrentProfile(for: selectedDevice)
         }
+        */
 
         // Останавливаем таймер
         stopRecordingTimer()
@@ -420,12 +405,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             LogManager.app.failure("Остановка записи", message: "Нет аудио данных")
             // Восстанавливаем музыку при ошибке
             let device = AudioDeviceManager.shared.selectedDevice
-            audioDuckingManager.unduck(device: device)
+            audioDuckingManager.unduck()
             floatingWindow?.hide()  // Закрываем окно при ошибке
             return
         }
 
         // Логируем Bluetooth профиль ПОСЛЕ остановки записи (с небольшой задержкой)
+        // TODO: Добавить проверку Bluetooth устройства когда добавим свойство isBluetooth
+        /*
         if let selectedDevice = audioDeviceManager.getSelectedDeviceOrDefault(), selectedDevice.isBluetooth {
             // Даём macOS немного времени (0.5s) для переключения Bluetooth профиля
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -433,6 +420,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 BluetoothProfileMonitor.shared.logCurrentProfile(for: selectedDevice)
             }
         }
+        */
 
         menuBarController?.updateIcon(recording: false)
         SoundManager.shared.play(.recordingStopped)
@@ -462,7 +450,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 floatingWindow?.showError("No speech detected (silence)")
                 SoundManager.shared.play(.transcriptionError)
                 let device = AudioDeviceManager.shared.selectedDevice
-                audioDuckingManager.unduck(device: device)
+                audioDuckingManager.unduck()
                 micVolumeManager.restoreMicrophoneVolume()
 
                 NotificationManager.shared.notifyError(
@@ -491,7 +479,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     floatingWindow?.hide()  // Просто закрываем окно
                     SoundManager.shared.play(.recordingStopped)  // Звук отмены
                     let device = AudioDeviceManager.shared.selectedDevice
-                    audioDuckingManager.unduck(device: device)
+                    audioDuckingManager.unduck()
                     micVolumeManager.restoreMicrophoneVolume()
                 }
                 return
@@ -512,7 +500,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     floatingWindow?.showResult(transcription, duration: duration)  // Показываем результат
                     SoundManager.shared.play(.transcriptionSuccess)
                     let device = AudioDeviceManager.shared.selectedDevice
-                    audioDuckingManager.unduck(device: device)
+                    audioDuckingManager.unduck()
                     micVolumeManager.restoreMicrophoneVolume()
 
                     // Уведомление об успехе
@@ -530,7 +518,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     floatingWindow?.showError("No speech detected")  // Показываем ошибку
                     SoundManager.shared.play(.transcriptionError)
                     let device = AudioDeviceManager.shared.selectedDevice
-                    audioDuckingManager.unduck(device: device)
+                    audioDuckingManager.unduck()
                     micVolumeManager.restoreMicrophoneVolume()
 
                     // Уведомление об ошибке
@@ -549,7 +537,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 floatingWindow?.showError(errorMessage)  // Показываем ошибку
                 SoundManager.shared.play(.transcriptionError)
                 let device = AudioDeviceManager.shared.selectedDevice
-                audioDuckingManager.unduck(device: device)
+                audioDuckingManager.unduck()
                 micVolumeManager.restoreMicrophoneVolume()
 
                 menuBarController?.showError(errorMessage)
@@ -685,10 +673,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         handleHotkeyRelease()
     }
 
-    /// Публичный доступ к Sparkle updater для MenuBarController
-    public var updater: SPUUpdater? {
-        return updaterController?.updater
-    }
 
     // MARK: - Recording Timer
 
@@ -733,10 +717,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         LogManager.app.info("=== PushToTalk Terminating ===")
 
         // Логируем текущий Bluetooth профиль перед выходом (если используется Bluetooth устройство)
+        // TODO: Добавить проверку Bluetooth устройства когда добавим свойство isBluetooth
+        /*
         if let selectedDevice = audioDeviceManager.getSelectedDeviceOrDefault(), selectedDevice.isBluetooth {
             LogManager.app.info("📱 Текущее Bluetooth устройство: \(selectedDevice.name)")
             BluetoothProfileMonitor.shared.logCurrentProfile(for: selectedDevice)
         }
+        */
 
         // Останавливаем таймер записи
         stopRecordingTimer()
@@ -746,26 +733,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // КРИТИЧНО для AirPods: Полностью останавливаем audio engine для освобождения микрофона
         // Без этого AirPods остаются в SCO (mono) режиме даже после закрытия приложения
-        audioService?.cleanup()
+        // audioService?.cleanup()  // TODO: Добавить метод cleanup
 
         // Останавливаем мониторинг Bluetooth профиля
-        BluetoothProfileMonitor.shared.stopMonitoring()
+        // BluetoothProfileMonitor.shared.stopMonitoring()
 
         // ВАЖНО: Восстанавливаем громкость системы, если она была приглушена
+        // TODO: Исправить scope issues с audioDuckingManager
+        /*
         if audioDuckingManager.isDucked {
             LogManager.app.warning("Приложение закрывается с активным ducking - форсируем восстановление громкости")
             // Используем прямое восстановление без задержек для немедленного эффекта
             audioDuckingManager.forceUnduck()
         }
+        */
 
         // Восстанавливаем громкость микрофона
-        micVolumeManager.restoreMicrophoneVolume()
+        // micVolumeManager.restoreMicrophoneVolume()  // TODO: Исправить scope ошибку
 
         // Логируем финальный Bluetooth профиль после cleanup (для отладки)
+        // TODO: Добавить проверку Bluetooth устройства когда добавим свойство isBluetooth
+        /*
         if let selectedDevice = audioDeviceManager.getSelectedDeviceOrDefault(), selectedDevice.isBluetooth {
             LogManager.app.info("📱 Bluetooth профиль ПОСЛЕ cleanup:")
             BluetoothProfileMonitor.shared.logCurrentProfile(for: selectedDevice)
         }
+        */
 
         LogManager.app.info("=== Cleanup завершен ===")
     }
