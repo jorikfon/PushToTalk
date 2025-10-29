@@ -82,6 +82,7 @@ public class FileTranscriptionViewModel: ObservableObject {
     @Published var state: TranscriptionState = .idle
     @Published var currentFile: String = ""
     @Published var progress: Double = 0.0
+    @Published var modelName: String = ""  // Текущая модель Whisper
 
     // ВАЖНО: Используем willSet вместо @Published для массива, чтобы избежать проблем с памятью
     var transcriptions: [FileTranscription] = [] {
@@ -89,6 +90,9 @@ public class FileTranscriptionViewModel: ObservableObject {
             objectWillChange.send()
         }
     }
+
+    // Глобальный аудио плеер для всех транскрипций
+    let globalAudioPlayer = AudioPlayerManager()
 
     private var fileQueue: [URL] = []
     private var currentIndex = 0
@@ -101,6 +105,11 @@ public class FileTranscriptionViewModel: ObservableObject {
         self.currentFile = ""
         self.progress = 0.0
         self.currentIndex = 0
+        self.modelName = ""
+    }
+
+    public func setModel(_ modelName: String) {
+        self.modelName = modelName
     }
 
     public func startTranscription(files: [URL]) {
@@ -116,23 +125,47 @@ public class FileTranscriptionViewModel: ObservableObject {
         self.progress = progress
     }
 
-    public func addTranscription(file: String, text: String) {
-        let transcription = FileTranscription(fileName: file, text: text, status: .success, dialogue: nil)
+    public func addTranscription(file: String, text: String, fileURL: URL? = nil) {
+        let transcription = FileTranscription(fileName: file, text: text, status: .success, dialogue: nil, fileURL: fileURL)
         transcriptions.append(transcription)
     }
 
-    public func addDialogue(file: String, dialogue: DialogueTranscription) {
+    public func addDialogue(file: String, dialogue: DialogueTranscription, fileURL: URL? = nil) {
         let transcription = FileTranscription(
             fileName: file,
             text: dialogue.formatted(),
             status: .success,
-            dialogue: dialogue
+            dialogue: dialogue,
+            fileURL: fileURL
         )
         transcriptions.append(transcription)
     }
 
+    /// Обновляет существующий диалог или создаёт новый (для постепенного добавления реплик)
+    public func updateDialogue(file: String, dialogue: DialogueTranscription, fileURL: URL? = nil) {
+        LogManager.app.debug("updateDialogue: \(file), turns: \(dialogue.turns.count), isStereo: \(dialogue.isStereo)")
+
+        // Ищем существующую транскрипцию для этого файла
+        if let index = transcriptions.firstIndex(where: { $0.fileName == file }) {
+            // Обновляем существующую
+            let updated = FileTranscription(
+                fileName: file,
+                text: dialogue.formatted(),
+                status: .success,
+                dialogue: dialogue,
+                fileURL: fileURL
+            )
+            transcriptions[index] = updated
+            LogManager.app.debug("Обновлена существующая транскрипция #\(index)")
+        } else {
+            // Создаём новую
+            addDialogue(file: file, dialogue: dialogue, fileURL: fileURL)
+            LogManager.app.debug("Создана новая транскрипция")
+        }
+    }
+
     public func addError(file: String, error: String) {
-        let transcription = FileTranscription(fileName: file, text: error, status: .error, dialogue: nil)
+        let transcription = FileTranscription(fileName: file, text: error, status: .error, dialogue: nil, fileURL: nil)
         transcriptions.append(transcription)
     }
 
@@ -156,6 +189,7 @@ struct FileTranscription: Identifiable {
     let text: String
     let status: Status
     let dialogue: DialogueTranscription?  // Опциональный диалог для стерео
+    let fileURL: URL?  // URL оригинального файла для воспроизведения
 
     enum Status {
         case success
@@ -175,10 +209,23 @@ struct FileTranscriptionView: View {
 
             VStack(spacing: 20) {
                 // Заголовок
-                Text("File Transcription")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                    .padding(.top, 20)
+                VStack(spacing: 8) {
+                    Text("File Transcription")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+
+                    // Отображение модели Whisper
+                    if !viewModel.modelName.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "cpu")
+                                .foregroundColor(.blue)
+                            Text("Model: \(viewModel.modelName)")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding(.top, 20)
 
                 // Прогресс
                 if viewModel.state == .processing {
@@ -202,7 +249,10 @@ struct FileTranscriptionView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(viewModel.transcriptions) { transcription in
-                            TranscriptionResultCard(transcription: transcription)
+                            TranscriptionResultCard(
+                                transcription: transcription,
+                                audioPlayer: viewModel.globalAudioPlayer
+                            )
                         }
                     }
                     .padding(.horizontal, 20)
@@ -300,6 +350,7 @@ struct FileTranscriptionView: View {
 /// Карточка с результатом транскрипции файла
 struct TranscriptionResultCard: View {
     let transcription: FileTranscription
+    @ObservedObject var audioPlayer: AudioPlayerManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -326,38 +377,16 @@ struct TranscriptionResultCard: View {
                 }
             }
 
+            // Аудио плеер (если есть URL файла)
+            if let fileURL = transcription.fileURL {
+                AudioPlayerView(audioPlayer: audioPlayer, fileURL: fileURL)
+                    .padding(.vertical, 8)
+            }
+
             // Текст транскрипции или диалог
             if let dialogue = transcription.dialogue, dialogue.isStereo {
-                // Показываем диалог для стерео
-                VStack(alignment: .leading, spacing: 8) {
-                    // Индикатор стерео
-                    HStack {
-                        Image(systemName: "headphones")
-                            .foregroundColor(.blue)
-                        Text("Stereo Dialogue")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-
-                    // Реплики дикторов
-                    ForEach(0..<dialogue.turns.count, id: \.self) { index in
-                        let turn = dialogue.turns[index]
-                        HStack(alignment: .top, spacing: 8) {
-                            // Индикатор диктора
-                            Text(turn.speaker.displayName)
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(turn.speaker == .left ? .blue : .orange)
-                                .frame(width: 80, alignment: .leading)
-
-                            // Текст реплики
-                            Text(turn.text)
-                                .font(.system(size: 12))
-                                .foregroundColor(.primary)
-                                .multilineTextAlignment(.leading)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
+                // Показываем диалог для стерео в виде чата
+                DialogueChatView(dialogue: dialogue, audioPlayer: audioPlayer)
             } else {
                 // Обычный текст для моно
                 Text(transcription.text)
@@ -370,6 +399,228 @@ struct TranscriptionResultCard: View {
         .padding(12)
         .background(Color.gray.opacity(0.2))
         .cornerRadius(10)
+        .onAppear {
+            // Загружаем аудио файл при появлении
+            if let fileURL = transcription.fileURL {
+                do {
+                    try audioPlayer.loadAudio(from: fileURL)
+                } catch {
+                    LogManager.app.failure("Ошибка загрузки аудио", error: error)
+                }
+            }
+        }
+    }
+}
+
+/// Чат-подобное отображение диалога с timeline
+struct DialogueChatView: View {
+    let dialogue: DialogueTranscription
+    @ObservedObject var audioPlayer: AudioPlayerManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Заголовок с информацией
+            HStack {
+                Image(systemName: "headphones")
+                    .foregroundColor(.blue)
+                Text("Stereo Dialogue")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                // Общая длительность
+                Text(formatDuration(dialogue.totalDuration))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            // Timeline с репликами (отсортированные по времени)
+            // УБРАН ScrollView и maxHeight - используем естественный layout
+            if dialogue.sortedByTime.isEmpty {
+                Text("Нет распознанных реплик")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(dialogue.sortedByTime) { turn in
+                        ChatMessageBubble(turn: turn, audioPlayer: audioPlayer)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", minutes, secs)
+    }
+}
+
+/// Пузырь сообщения в стиле мессенджера
+struct ChatMessageBubble: View {
+    let turn: DialogueTranscription.Turn
+    @ObservedObject var audioPlayer: AudioPlayerManager
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            // Левое выравнивание для Speaker 1
+            if turn.speaker == .left {
+                messageContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 60)  // Отступ справа
+            } else {
+                // Правое выравнивание для Speaker 2
+                Spacer(minLength: 60)  // Отступ слева
+                messageContent
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+    }
+
+    private var messageContent: some View {
+        VStack(alignment: turn.speaker == .left ? .leading : .trailing, spacing: 4) {
+            // Заголовок с именем диктора и временем
+            HStack(spacing: 6) {
+                if turn.speaker == .left {
+                    speakerLabel
+                    timeLabel
+                } else {
+                    timeLabel
+                    speakerLabel
+                }
+            }
+
+            // Текст сообщения (кликабельный для перехода к времени)
+            Text(turn.text)
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(bubbleColor)
+                .cornerRadius(16)
+                .multilineTextAlignment(turn.speaker == .left ? .leading : .trailing)
+                .onTapGesture {
+                    // Переход к времени реплики и начало воспроизведения
+                    audioPlayer.seekAndPlay(to: turn.startTime)
+                    LogManager.app.info("Переход к реплике: \(turn.startTime)s")
+                }
+                .help("Click to play from this time")
+        }
+    }
+
+    private var speakerLabel: some View {
+        Text(turn.speaker.displayName)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(turn.speaker == .left ? .blue : .orange)
+    }
+
+    private var timeLabel: some View {
+        Text(formatTimestamp(turn.startTime))
+            .font(.system(size: 9, weight: .regular))
+            .foregroundColor(.secondary)
+    }
+
+    private var bubbleColor: Color {
+        if turn.speaker == .left {
+            return Color.blue.opacity(0.15)
+        } else {
+            return Color.orange.opacity(0.15)
+        }
+    }
+
+    private func formatTimestamp(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", minutes, secs)
+    }
+}
+
+/// Аудио плеер для воспроизведения файла
+struct AudioPlayerView: View {
+    @ObservedObject var audioPlayer: AudioPlayerManager
+    let fileURL: URL
+
+    var body: some View {
+        VStack(spacing: 8) {
+            // Прогресс бар
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    // Фоновая дорожка
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(height: 4)
+                        .cornerRadius(2)
+
+                    // Прогресс
+                    Rectangle()
+                        .fill(Color.blue)
+                        .frame(width: geometry.size.width * CGFloat(audioPlayer.currentTime / max(audioPlayer.duration, 1)), height: 4)
+                        .cornerRadius(2)
+                }
+                .frame(height: 4)
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let newTime = Double(value.location.x / geometry.size.width) * audioPlayer.duration
+                            audioPlayer.seek(to: newTime)
+                        }
+                )
+            }
+            .frame(height: 4)
+
+            // Контролы плеера
+            HStack(spacing: 12) {
+                // Кнопка Play/Pause
+                Button(action: {
+                    audioPlayer.togglePlayback()
+                }) {
+                    Image(systemName: audioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Текущее время
+                Text(formatTime(audioPlayer.currentTime))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                // Общая длительность
+                Text(formatTime(audioPlayer.duration))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+
+                // Громкость
+                HStack(spacing: 6) {
+                    Image(systemName: "speaker.wave.2")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+
+                    Slider(value: Binding(
+                        get: { Double(audioPlayer.volume) },
+                        set: { audioPlayer.setVolume(Float($0)) }
+                    ), in: 0...1)
+                    .frame(width: 60)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(8)
+    }
+
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
     }
 }
 

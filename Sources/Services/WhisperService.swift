@@ -6,10 +6,15 @@ import Metal
 /// Поддерживает модели: tiny, base, small
 public class WhisperService {
     private var whisperKit: WhisperKit?
-    private let modelSize: String
+    private var modelSize: String  // Изменено с let на var для возможности смены модели
+    private let vocabularyManager = VocabularyManager.shared
+    private let audioNormalizer = AudioNormalizer(parameters: .default)
 
     // Prompt для специальных терминов и контекста
     public var promptText: String? = nil
+
+    // Включить нормализацию аудио (по умолчанию включено)
+    public var enableNormalization: Bool = true
 
     // Performance metrics
     public private(set) var lastTranscriptionTime: TimeInterval = 0
@@ -17,9 +22,39 @@ public class WhisperService {
     private var transcriptionCount: Int = 0
     private var totalRTF: Double = 0
 
+    /// Размер текущей модели
+    public var currentModelSize: String {
+        return modelSize
+    }
+
     public init(modelSize: String = "small") {
         self.modelSize = modelSize
         LogManager.transcription.info("Инициализация WhisperService с моделью \(modelSize)")
+    }
+
+    /// Перезагружает WhisperKit с новой моделью
+    /// - Parameter newModelSize: Размер новой модели (tiny, base, small, medium, large)
+    public func reloadModel(newModelSize: String) async throws {
+        guard newModelSize != modelSize else {
+            LogManager.transcription.info("Модель \(newModelSize) уже загружена, перезагрузка не требуется")
+            return
+        }
+
+        LogManager.transcription.begin("Смена модели", details: "\(modelSize) → \(newModelSize)")
+
+        // Освобождаем старую модель
+        whisperKit = nil
+
+        // Обновляем размер
+        modelSize = newModelSize
+
+        // Загружаем новую модель
+        try await loadModel()
+
+        // Сбрасываем статистику
+        resetPerformanceStats()
+
+        LogManager.transcription.success("Модель успешно сменена на \(newModelSize)")
     }
 
     /// Загрузка модели Whisper
@@ -67,6 +102,16 @@ public class WhisperService {
             throw WhisperError.modelNotLoaded
         }
 
+        // Нормализация аудио перед транскрипцией
+        var processedSamples = audioSamples
+        if enableNormalization {
+            let stats = audioNormalizer.analyze(audioSamples)
+            if stats.isQuiet {
+                LogManager.transcription.info("Тихое аудио обнаружено (RMS=\(stats.rms)), применяем нормализацию")
+                processedSamples = audioNormalizer.normalize(audioSamples)
+            }
+        }
+
         // ОПТИМАЛЬНЫЕ настройки для СМЕШАННОЙ речи (RU+EN)
         // Ограничиваем только русским и английским языками
         let options = DecodingOptions(
@@ -79,7 +124,7 @@ public class WhisperService {
         )
 
         let results = try await whisperKit.transcribe(
-            audioArray: audioSamples,
+            audioArray: processedSamples,
             decodeOptions: options
         )
 
@@ -87,13 +132,42 @@ public class WhisperService {
             return ""
         }
 
-        return firstResult.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let transcription = firstResult.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+
+        // Apply vocabulary corrections
+        let correctedText = vocabularyManager.correctTranscription(transcription)
+
+        return correctedText
     }
 
-    /// Транскрипция аудио данных с измерением производительности
+    /// Транскрипция аудио данных с контекстным промптом
+    /// - Parameters:
+    ///   - audioSamples: Массив Float32 аудио сэмплов (16kHz mono)
+    ///   - contextPrompt: Опциональный промпт с предыдущим контекстом для улучшения связности
+    /// - Returns: Распознанный текст
+    public func transcribe(audioSamples: [Float], contextPrompt: String? = nil) async throws -> String {
+        // Временно сохраняем текущий prompt
+        let originalPrompt = self.promptText
+
+        // Устанавливаем контекстный промпт если передан
+        if let context = contextPrompt, !context.isEmpty {
+            self.promptText = context
+            LogManager.transcription.debug("Используем контекстный промпт: \"\(context.prefix(100))...\"")
+        }
+
+        // Вызываем основную транскрипцию
+        let result = try await transcribeInternal(audioSamples: audioSamples)
+
+        // Восстанавливаем оригинальный prompt
+        self.promptText = originalPrompt
+
+        return result
+    }
+
+    /// Транскрипция аудио данных с измерением производительности (внутренний метод)
     /// - Parameter audioSamples: Массив Float32 аудио сэмплов (16kHz mono)
     /// - Returns: Распознанный текст
-    public func transcribe(audioSamples: [Float]) async throws -> String {
+    private func transcribeInternal(audioSamples: [Float]) async throws -> String {
         guard let whisperKit = whisperKit else {
             LogManager.transcription.failure("Транскрипция", message: "Модель не загружена")
             throw WhisperError.modelNotLoaded
@@ -103,6 +177,23 @@ public class WhisperService {
         let audioDuration = Double(sampleCount) / 16000.0  // 16kHz sample rate
 
         LogManager.transcription.begin("Транскрипция", details: "\(sampleCount) samples, \(String(format: "%.2f", audioDuration))s")
+
+        // Нормализация аудио перед транскрипцией
+        var processedSamples = audioSamples
+        if enableNormalization {
+            let stats = audioNormalizer.analyze(audioSamples)
+            LogManager.transcription.debug("Аудио статистика: peak=\(String(format: "%.3f", stats.peak)), rms=\(String(format: "%.3f", stats.rms))")
+
+            if stats.isQuiet {
+                LogManager.transcription.info("Тихое аудио обнаружено (RMS=\(String(format: "%.3f", stats.rms))), применяем нормализацию")
+                processedSamples = audioNormalizer.normalize(audioSamples)
+
+                let normalizedStats = audioNormalizer.analyze(processedSamples)
+                LogManager.transcription.success("Нормализация завершена: RMS \(String(format: "%.3f", stats.rms)) → \(String(format: "%.3f", normalizedStats.rms))")
+            } else {
+                LogManager.transcription.debug("Громкость аудио достаточная, нормализация не требуется")
+            }
+        }
 
         let startTime = Date()
 
@@ -127,7 +218,7 @@ public class WhisperService {
             }
 
             let results = try await whisperKit.transcribe(
-                audioArray: audioSamples,
+                audioArray: processedSamples,
                 decodeOptions: options
             )
 
@@ -153,15 +244,22 @@ public class WhisperService {
             let transcription = firstResult.text
             let cleanedText = transcription.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
 
+            // Apply vocabulary corrections
+            let correctedText = vocabularyManager.correctTranscription(cleanedText)
+
             // Логирование производительности
             let speedMultiplier = audioDuration / transcriptionTime
             LogManager.transcription.success(
                 "Транскрипция завершена",
-                details: "\"\(cleanedText)\" (\(String(format: "%.2f", transcriptionTime))s, RTF: \(String(format: "%.2f", rtf))x, \(String(format: "%.1f", speedMultiplier))x realtime)"
+                details: "\"\(correctedText)\" (\(String(format: "%.2f", transcriptionTime))s, RTF: \(String(format: "%.2f", rtf))x, \(String(format: "%.1f", speedMultiplier))x realtime)"
             )
             LogManager.transcription.debug("Avg RTF: \(String(format: "%.2f", self.averageRTF))x over \(self.transcriptionCount) transcriptions")
 
-            return cleanedText
+            if cleanedText != correctedText {
+                LogManager.transcription.debug("Vocabulary correction applied: '\(cleanedText)' -> '\(correctedText)'")
+            }
+
+            return correctedText
         } catch {
             LogManager.transcription.failure("Транскрипция", error: error)
             throw WhisperError.transcriptionFailed(error)

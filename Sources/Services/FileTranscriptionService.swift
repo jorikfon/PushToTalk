@@ -2,47 +2,106 @@ import Foundation
 import AVFoundation
 import PushToTalkCore
 
-/// Структура для хранения диалога с разделением по дикторам
+/// Структура для хранения диалога с разделением по дикторам и временными метками
 public struct DialogueTranscription {
-    public struct Turn {
+    public struct Turn: Identifiable {
+        public let id = UUID()  // Уникальный идентификатор для SwiftUI
         public let speaker: Speaker
         public let text: String
+        public let startTime: TimeInterval  // Время начала реплики в секундах
+        public let endTime: TimeInterval    // Время окончания реплики в секундах
 
         public enum Speaker {
             case left   // Левый канал (Speaker 1)
             case right  // Правый канал (Speaker 2)
 
-            var displayName: String {
+            public var displayName: String {
                 switch self {
                 case .left: return "Speaker 1"
                 case .right: return "Speaker 2"
                 }
             }
+
+            public var color: String {
+                switch self {
+                case .left: return "blue"
+                case .right: return "orange"
+                }
+            }
+        }
+
+        public var duration: TimeInterval {
+            return endTime - startTime
+        }
+
+        public init(speaker: Speaker, text: String, startTime: TimeInterval, endTime: TimeInterval) {
+            self.speaker = speaker
+            self.text = text
+            self.startTime = startTime
+            self.endTime = endTime
         }
     }
 
     public let turns: [Turn]
     public let isStereo: Bool
+    public let totalDuration: TimeInterval  // Общая длительность диалога
 
-    /// Форматирует диалог как текст
+    public init(turns: [Turn], isStereo: Bool, totalDuration: TimeInterval = 0) {
+        self.turns = turns
+        self.isStereo = isStereo
+        self.totalDuration = totalDuration
+    }
+
+    /// Возвращает реплики, отсортированные по времени (для timeline)
+    public var sortedByTime: [Turn] {
+        return turns.sorted { $0.startTime < $1.startTime }
+    }
+
+    /// Форматирует диалог как текст с временными метками
     public func formatted() -> String {
         if !isStereo || turns.isEmpty {
             return turns.first?.text ?? ""
         }
 
-        return turns.map { turn in
-            "[\(turn.speaker.displayName)]: \(turn.text)"
+        return sortedByTime.map { turn in
+            let timestamp = formatTimestamp(turn.startTime)
+            return "[\(timestamp)] \(turn.speaker.displayName): \(turn.text)"
         }.joined(separator: "\n\n")
+    }
+
+    private func formatTimestamp(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        let millis = Int((seconds.truncatingRemainder(dividingBy: 1)) * 1000)
+        return String(format: "%02d:%02d.%03d", minutes, secs, millis)
     }
 }
 
 /// Сервис для транскрипции audio/video файлов
 /// Загружает файл, конвертирует в формат WhisperKit и транскрибирует
 public class FileTranscriptionService {
+
+    /// Режим транскрипции
+    public enum TranscriptionMode {
+        case vad        // Использовать Voice Activity Detection (лучше для чистого аудио)
+        case batch      // Пакетная транскрипция фиксированными чанками (лучше для низкого качества)
+    }
+
     private let whisperService: WhisperService
+    private var batchService: BatchTranscriptionService?
+
+    /// Текущий режим транскрипции
+    public var mode: TranscriptionMode = .batch  // По умолчанию batch для телефонного аудио
+
+    /// Callback для обновления промежуточных результатов (прогресс и реплики)
+    public var onProgressUpdate: ((String, Double, DialogueTranscription?) -> Void)?
 
     public init(whisperService: WhisperService) {
         self.whisperService = whisperService
+        self.batchService = BatchTranscriptionService(
+            whisperService: whisperService,
+            parameters: .lowQuality
+        )
     }
 
     /// Транскрибирует аудио/видео файл с поддержкой стерео разделения
@@ -51,7 +110,22 @@ public class FileTranscriptionService {
     /// - Throws: Ошибки загрузки или транскрипции
     public func transcribeFileWithDialogue(at url: URL) async throws -> DialogueTranscription {
         LogManager.app.begin("Транскрипция файла с определением дикторов: \(url.lastPathComponent)")
+        LogManager.app.info("Режим транскрипции: \(mode == .batch ? "BATCH" : "VAD")")
 
+        // Используем batch режим, если выбран
+        if mode == .batch {
+            guard let batchService = batchService else {
+                throw NSError(domain: "FileTranscriptionService", code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "BatchTranscriptionService не инициализирован"])
+            }
+
+            // Пробрасываем callback в batchService
+            batchService.onProgressUpdate = onProgressUpdate
+
+            return try await batchService.transcribe(url: url)
+        }
+
+        // VAD режим (оригинальный код)
         // 1. Проверяем, стерео ли файл
         let channelCount = try await getChannelCount(from: url)
         LogManager.app.info("Обнаружено каналов: \(channelCount)")
@@ -61,11 +135,27 @@ public class FileTranscriptionService {
             return try await transcribeStereoAsDialogue(url: url)
         } else {
             // Моно: обычная транскрипция
-            let text = try await transcribeFile(at: url)
-            return DialogueTranscription(
-                turns: [DialogueTranscription.Turn(speaker: .left, text: text)],
-                isStereo: false
+            let audioSamples = try await loadAudio(from: url)
+            let totalDuration = TimeInterval(audioSamples.count) / 16000.0
+            let text = try await whisperService.transcribe(audioSamples: audioSamples)
+
+            LogManager.app.info("Моно транскрипция завершена: \(text.count) символов")
+
+            let dialogue = DialogueTranscription(
+                turns: [DialogueTranscription.Turn(
+                    speaker: .left,
+                    text: text,
+                    startTime: 0,
+                    endTime: totalDuration
+                )],
+                isStereo: false,
+                totalDuration: totalDuration
             )
+
+            // Вызываем callback для моно файлов тоже
+            onProgressUpdate?(url.lastPathComponent, 1.0, dialogue)
+
+            return dialogue
         }
     }
 
@@ -158,13 +248,8 @@ public class FileTranscriptionService {
         let durationSeconds = Float(audioSamples.count) / 16000.0
         LogManager.app.success("Файл загружен: \(audioSamples.count) samples, \(String(format: "%.1f", durationSeconds))s")
 
-        // Проверяем максимальную длительность (60 минут = 3600s)
-        let maxDuration: Float = 3600.0
-        if durationSeconds > maxDuration {
-            LogManager.app.warning("Файл слишком длинный (\(String(format: "%.0f", durationSeconds))s), обрезаем до \(String(format: "%.0f", maxDuration))s")
-            let maxSamples = Int(maxDuration * 16000.0)
-            return Array(audioSamples.prefix(maxSamples))
-        }
+        // Ограничение убрано - поддерживаем файлы любой длительности
+        // Транскрипция будет происходить по сегментам через VAD
 
         return audioSamples
     }
@@ -199,29 +284,85 @@ public class FileTranscriptionService {
         let leftChannel = extractChannel(from: stereoSamples, channel: 0)
         let rightChannel = extractChannel(from: stereoSamples, channel: 1)
 
-        // 3. Транскрибируем каждый канал отдельно
-        LogManager.app.info("Транскрибируем левый канал (Speaker 1)...")
-        let leftText = try await whisperService.transcribe(audioSamples: leftChannel)
+        // 3. Определяем общую длительность
+        let totalDuration = TimeInterval(leftChannel.count) / 16000.0
 
-        LogManager.app.info("Транскрибируем правый канал (Speaker 2)...")
-        let rightText = try await whisperService.transcribe(audioSamples: rightChannel)
+        // 4. Используем VAD для определения сегментов речи в каждом канале
+        // Используем lowQuality параметры для лучшего распознавания телефонного аудио
+        let vad = VoiceActivityDetector(parameters: .lowQuality)
 
-        // 4. Создаём диалог с полными текстами от каждого диктора
+        LogManager.app.info("🎤 VAD: анализ левого канала...")
+        let leftSegments = vad.detectSpeechSegments(in: leftChannel)
+        LogManager.app.info("Найдено \(leftSegments.count) сегментов речи в левом канале")
+
+        LogManager.app.info("🎤 VAD: анализ правого канала...")
+        let rightSegments = vad.detectSpeechSegments(in: rightChannel)
+        LogManager.app.info("Найдено \(rightSegments.count) сегментов речи в правом канале")
+
+        // 5. Транскрибируем каждый сегмент отдельно
         var turns: [DialogueTranscription.Turn] = []
+        let totalSegments = leftSegments.count + rightSegments.count
+        var processedSegments = 0
 
-        // Добавляем все реплики левого канала (Speaker 1)
-        if !leftText.isEmpty {
-            turns.append(DialogueTranscription.Turn(speaker: .left, text: leftText))
+        // Транскрибируем левый канал (Speaker 1)
+        for segment in leftSegments {
+            let segmentAudio = vad.extractAudio(from: leftChannel, segment: segment)
+
+            if !SilenceDetector.shared.isSilence(segmentAudio) {
+                LogManager.app.info("Транскрибируем Speaker 1: \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s")
+                let text = try await whisperService.transcribe(audioSamples: segmentAudio)
+
+                if !text.isEmpty {
+                    turns.append(DialogueTranscription.Turn(
+                        speaker: .left,
+                        text: text,
+                        startTime: segment.startTime,
+                        endTime: segment.endTime
+                    ))
+
+                    // Обновляем прогресс после каждой реплики
+                    processedSegments += 1
+                    let progress = Double(processedSegments) / Double(totalSegments)
+                    let partialDialogue = DialogueTranscription(turns: turns, isStereo: true, totalDuration: totalDuration)
+                    LogManager.app.debug("Обновление прогресса: \(processedSegments)/\(totalSegments), turns: \(turns.count)")
+                    onProgressUpdate?(url.lastPathComponent, progress, partialDialogue)
+                } else {
+                    LogManager.app.warning("Speaker 1: пустой текст для сегмента \(String(format: "%.1f", segment.startTime))s")
+                }
+            }
         }
 
-        // Добавляем все реплики правого канала (Speaker 2)
-        if !rightText.isEmpty {
-            turns.append(DialogueTranscription.Turn(speaker: .right, text: rightText))
+        // Транскрибируем правый канал (Speaker 2)
+        for segment in rightSegments {
+            let segmentAudio = vad.extractAudio(from: rightChannel, segment: segment)
+
+            if !SilenceDetector.shared.isSilence(segmentAudio) {
+                LogManager.app.info("Транскрибируем Speaker 2: \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s")
+                let text = try await whisperService.transcribe(audioSamples: segmentAudio)
+
+                if !text.isEmpty {
+                    turns.append(DialogueTranscription.Turn(
+                        speaker: .right,
+                        text: text,
+                        startTime: segment.startTime,
+                        endTime: segment.endTime
+                    ))
+
+                    // Обновляем прогресс после каждой реплики
+                    processedSegments += 1
+                    let progress = Double(processedSegments) / Double(totalSegments)
+                    let partialDialogue = DialogueTranscription(turns: turns, isStereo: true, totalDuration: totalDuration)
+                    LogManager.app.debug("Обновление прогресса: \(processedSegments)/\(totalSegments), turns: \(turns.count)")
+                    onProgressUpdate?(url.lastPathComponent, progress, partialDialogue)
+                } else {
+                    LogManager.app.warning("Speaker 2: пустой текст для сегмента \(String(format: "%.1f", segment.startTime))s")
+                }
+            }
         }
 
-        LogManager.app.success("Стерео транскрипция завершена: левый канал (\(leftText.count) символов), правый канал (\(rightText.count) символов)")
+        LogManager.app.success("Стерео транскрипция завершена: \(turns.count) реплик (\(leftSegments.count) левых, \(rightSegments.count) правых)")
 
-        return DialogueTranscription(turns: turns, isStereo: true)
+        return DialogueTranscription(turns: turns, isStereo: true, totalDuration: totalDuration)
     }
 
     /// Загружает стерео аудио (сохраняя оба канала)
