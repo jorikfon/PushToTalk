@@ -2,9 +2,35 @@ import SwiftUI
 import AppKit
 import PushToTalkCore
 
+// MARK: - Адаптивные цвета для тёмной темы
+extension Color {
+    /// Адаптивный цвет для Speaker 1 (левый канал)
+    static var speaker1Background: Color {
+        Color(NSColor.controlAccentColor).opacity(0.1)
+    }
+
+    static var speaker1Accent: Color {
+        Color(NSColor.controlAccentColor)
+    }
+
+    /// Адаптивный цвет для Speaker 2 (правый канал)
+    static var speaker2Background: Color {
+        Color.orange.opacity(0.12)
+    }
+
+    static var speaker2Accent: Color {
+        Color.orange
+    }
+
+    /// Адаптивный фон для колонок
+    static var timelineColumnBackground: Color {
+        Color(NSColor.controlBackgroundColor).opacity(0.3)
+    }
+}
+
 /// Окно для отображения прогресса и результатов транскрипции файлов
 /// FIX: Используем NSPanel вместо NSWindow для предотвращения краша при закрытии
-public class FileTranscriptionWindow: NSPanel {
+public class FileTranscriptionWindow: NSPanel, NSWindowDelegate {
     private var hostingController: NSHostingController<FileTranscriptionView>?
     public var viewModel: FileTranscriptionViewModel
     public var onClose: ((FileTranscriptionWindow) -> Void)?
@@ -40,6 +66,7 @@ public class FileTranscriptionWindow: NSPanel {
         self.title = "File Transcription"
         self.isFloatingPanel = false
         self.becomesKeyOnlyIfNeeded = false
+        self.delegate = self  // Устанавливаем delegate для обработки событий закрытия
 
         // Создаём SwiftUI view с ViewModel
         let swiftUIView = FileTranscriptionView(viewModel: viewModel)
@@ -50,6 +77,14 @@ public class FileTranscriptionWindow: NSPanel {
         self.contentView = hosting.view
 
         LogManager.app.info("FileTranscriptionWindow: NSPanel создан с SwiftUI")
+    }
+
+    // MARK: - NSWindowDelegate
+
+    /// Вызывается при закрытии окна - останавливаем воспроизведение
+    public func windowWillClose(_ notification: Notification) {
+        viewModel.globalAudioPlayer.stop()
+        LogManager.app.info("FileTranscriptionWindow: Окно закрывается, воспроизведение остановлено")
     }
 
     /// Начать транскрипцию файлов
@@ -479,7 +514,7 @@ struct ChatMessageBubble: View {
     private var speakerLabel: some View {
         Text(turn.speaker.displayName)
             .font(.system(size: 10, weight: .bold))
-            .foregroundColor(turn.speaker == .left ? .blue : .orange)
+            .foregroundColor(turn.speaker == .left ? Color.speaker1Accent : Color.speaker2Accent)
     }
 
     private var timeLabel: some View {
@@ -490,9 +525,9 @@ struct ChatMessageBubble: View {
 
     private var bubbleColor: Color {
         if turn.speaker == .left {
-            return Color.blue.opacity(0.15)
+            return Color.speaker1Background
         } else {
-            return Color.orange.opacity(0.15)
+            return Color.speaker2Background
         }
     }
 
@@ -503,10 +538,128 @@ struct ChatMessageBubble: View {
     }
 }
 
+/// Маппер для визуального сжатия периодов тишины на timeline
+struct CompressedTimelineMapper {
+    struct SilenceGap {
+        let realStartTime: TimeInterval
+        let realEndTime: TimeInterval
+        let duration: TimeInterval
+    }
+
+    let silenceGaps: [SilenceGap]
+    let minGapToCompress: TimeInterval = 0.5  // Сжимаем gaps > 0.5 секунды (агрессивное сжатие)
+    let compressedGapDisplay: TimeInterval = 0.15  // Показываем как 0.15 секунды (минимальный зазор)
+
+    /// Инициализирует mapper, анализируя реплики и находя периоды тишины
+    /// ВАЖНО: Ищем промежутки, где ОБА спикера молчат одновременно
+    init(turns: [DialogueTranscription.Turn]) {
+        let sortedTurns = turns.sorted { $0.startTime < $1.startTime }
+        var gaps: [SilenceGap] = []
+
+        // Логирование для отладки
+        LogManager.app.debug("CompressedTimelineMapper: Анализ \(sortedTurns.count) реплик для поиска gaps")
+
+        guard !sortedTurns.isEmpty else {
+            self.silenceGaps = []
+            return
+        }
+
+        // 1. Создаем массив всех занятых временных интервалов
+        var occupiedIntervals: [(start: TimeInterval, end: TimeInterval)] = []
+        for turn in sortedTurns {
+            occupiedIntervals.append((start: turn.startTime, end: turn.endTime))
+        }
+
+        // 2. Сортируем интервалы по началу
+        occupiedIntervals.sort { $0.start < $1.start }
+
+        // 3. Объединяем перекрывающиеся интервалы
+        var mergedIntervals: [(start: TimeInterval, end: TimeInterval)] = []
+        var currentInterval = occupiedIntervals[0]
+
+        for i in 1..<occupiedIntervals.count {
+            let nextInterval = occupiedIntervals[i]
+
+            if nextInterval.start <= currentInterval.end {
+                // Интервалы перекрываются или соприкасаются - объединяем
+                currentInterval.end = max(currentInterval.end, nextInterval.end)
+            } else {
+                // Интервалы не перекрываются - сохраняем текущий и начинаем новый
+                mergedIntervals.append(currentInterval)
+                currentInterval = nextInterval
+            }
+        }
+        mergedIntervals.append(currentInterval)
+
+        LogManager.app.debug("  Объединено в \(mergedIntervals.count) непрерывных интервалов активности")
+
+        // 4. Находим промежутки тишины между объединенными интервалами
+        for i in 0..<(mergedIntervals.count - 1) {
+            let currentEnd = mergedIntervals[i].end
+            let nextStart = mergedIntervals[i + 1].start
+            let gapDuration = nextStart - currentEnd
+
+            // Сжимаем только длинные промежутки тишины (оба спикера молчат)
+            if gapDuration > minGapToCompress {
+                gaps.append(SilenceGap(
+                    realStartTime: currentEnd,
+                    realEndTime: nextStart,
+                    duration: gapDuration
+                ))
+                LogManager.app.debug("  Тишина (оба молчат): \(String(format: "%.1f", currentEnd))s - \(String(format: "%.1f", nextStart))s (длительность: \(String(format: "%.1f", gapDuration))s)")
+            }
+        }
+
+        self.silenceGaps = gaps
+        LogManager.app.info("CompressedTimelineMapper: Найдено \(gaps.count) периодов тишины (оба спикера) для сжатия")
+    }
+
+    /// Преобразует реальное время в визуальную позицию (с учетом сжатия)
+    func visualPosition(for realTime: TimeInterval) -> TimeInterval {
+        var visualTime = realTime
+
+        // Вычитаем сжатые интервалы для всех gaps, которые до этого времени
+        for gap in silenceGaps {
+            if realTime > gap.realStartTime {
+                let compressionAmount = min(gap.duration - compressedGapDisplay, gap.duration)
+                if realTime >= gap.realEndTime {
+                    // Полностью прошли gap - вычитаем всю компрессию
+                    visualTime -= compressionAmount
+                } else {
+                    // Внутри gap - частичная компрессия
+                    let withinGap = realTime - gap.realStartTime
+                    let ratio = withinGap / gap.duration
+                    visualTime -= compressionAmount * ratio
+                }
+            }
+        }
+
+        return max(0, visualTime)
+    }
+
+    /// Возвращает общую визуальную длительность (сжатую)
+    func totalVisualDuration(realDuration: TimeInterval) -> TimeInterval {
+        let totalCompression = silenceGaps.reduce(0.0) { sum, gap in
+            sum + (gap.duration - compressedGapDisplay)
+        }
+        return max(0, realDuration - totalCompression)
+    }
+}
+
 /// Отображение диалога в виде двух синхронизированных по времени колонок
 struct TimelineSyncedDialogueView: View {
     let dialogue: DialogueTranscription
     @ObservedObject var audioPlayer: AudioPlayerManager
+
+    // Mapper для визуального сжатия тишины
+    private var timelineMapper: CompressedTimelineMapper {
+        CompressedTimelineMapper(turns: dialogue.turns)
+    }
+
+    // Визуальная длительность (с учетом сжатия)
+    private var visualDuration: TimeInterval {
+        timelineMapper.totalVisualDuration(realDuration: dialogue.totalDuration)
+    }
 
     // Адаптивная высота: вычисляем оптимальный масштаб
     private var pixelsPerSecond: CGFloat {
@@ -518,14 +671,13 @@ struct TimelineSyncedDialogueView: View {
     private let minPixelsPerSecond: CGFloat = 15  // Минимум 15px/sec (более компактно)
     private let maxPixelsPerSecond: CGFloat = 80  // Максимум 80px/sec (для очень коротких)
 
-    /// Вычисляет адаптивный масштаб timeline на основе сжатой длительности
-    /// Диалог уже сжат (периоды тишины удалены), используем totalDuration напрямую
+    /// Вычисляет адаптивный масштаб timeline на основе ВИЗУАЛЬНОЙ длительности (сжатой)
     private func calculateAdaptiveScale() -> CGFloat {
         // Если нет реплик, используем средний масштаб
         guard !dialogue.turns.isEmpty else { return 40 }
 
-        // Диалог уже сжат, используем totalDuration
-        let duration = dialogue.totalDuration
+        // Используем ВИЗУАЛЬНУЮ длительность (с учетом сжатия тишины)
+        let duration = visualDuration
         guard duration > 0 else { return 40 }
 
         // Вычисляем идеальный масштаб, чтобы вместить диалог в maxTimelineHeight
@@ -561,48 +713,13 @@ struct TimelineSyncedDialogueView: View {
                     .foregroundColor(.secondary)
                     .padding()
             } else {
-                // Прокручиваемая область с timeline
+                // Две колонки с единой временной шкалой (показывает одновременную речь)
                 ScrollView {
-                    // Основной layout: временная шкала + две колонки
-                    HStack(alignment: .top, spacing: 12) {
-                        // Временная шкала слева (диалог уже сжат, показываем с 0)
-                        TimelineAxis(
-                            totalDuration: dialogue.totalDuration,
-                            pixelsPerSecond: pixelsPerSecond
-                        )
-                        .frame(width: 50)
-
-                        // Две синхронизированные колонки
-                        HStack(alignment: .top, spacing: 8) {
-                            // Колонка Speaker 1 (левый канал)
-                            SpeakerColumn(
-                                turns: dialogue.turns.filter { $0.speaker == .left },
-                                speaker: .left,
-                                totalDuration: dialogue.totalDuration,
-                                pixelsPerSecond: pixelsPerSecond,
-                                audioPlayer: audioPlayer
-                            )
-                            .frame(maxWidth: .infinity)
-
-                            // Разделитель
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(width: 1)
-
-                            // Колонка Speaker 2 (правый канал)
-                            SpeakerColumn(
-                                turns: dialogue.turns.filter { $0.speaker == .right },
-                                speaker: .right,
-                                totalDuration: dialogue.totalDuration,
-                                pixelsPerSecond: pixelsPerSecond,
-                                audioPlayer: audioPlayer
-                            )
-                            .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .padding(.top, 8)
+                    TimelineDialogueView(dialogue: dialogue, audioPlayer: audioPlayer)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
                 }
-                .frame(maxHeight: 400)
+                .frame(maxHeight: 600)
             }
         }
     }
@@ -614,10 +731,396 @@ struct TimelineSyncedDialogueView: View {
     }
 }
 
-/// Временная шкала (ось времени) - диалог уже сжат, показываем с 0
+/// Новый вид: компактные блоки с индикаторами длительности
+/// Высота блока = высота текста, слева цветная полоска = длительность
+struct TimelineDialogueView: View {
+    let dialogue: DialogueTranscription
+    @ObservedObject var audioPlayer: AudioPlayerManager
+
+    // Mapper для определения промежутков тишины
+    private var timelineMapper: CompressedTimelineMapper {
+        CompressedTimelineMapper(turns: dialogue.turns)
+    }
+
+    // Масштаб для индикатора длительности (px/sec)
+    private let durationBarScale: CGFloat = 3.0  // 3px = 1 секунда
+
+    // Структура для синхронизированной строки (левая и правая реплика на одном уровне)
+    struct SyncedRow {
+        let leftTurn: DialogueTranscription.Turn?
+        let rightTurn: DialogueTranscription.Turn?
+        let timestamp: TimeInterval  // Опорная временная метка для строки
+    }
+
+    // Синхронизированные строки - реплики с близкими временными метками на одном уровне
+    private var syncedRows: [SyncedRow] {
+        let leftTurns = dialogue.turns.filter { $0.speaker == .left }.sorted { $0.startTime < $1.startTime }
+        let rightTurns = dialogue.turns.filter { $0.speaker == .right }.sorted { $0.startTime < $1.startTime }
+
+        var rows: [SyncedRow] = []
+        var leftIndex = 0
+        var rightIndex = 0
+
+        // Порог времени для объединения реплик в одну строку (0.5 секунды)
+        let timeTolerance: TimeInterval = 0.5
+
+        while leftIndex < leftTurns.count || rightIndex < rightTurns.count {
+            let leftTurn = leftIndex < leftTurns.count ? leftTurns[leftIndex] : nil
+            let rightTurn = rightIndex < rightTurns.count ? rightTurns[rightIndex] : nil
+
+            if let left = leftTurn, let right = rightTurn {
+                // Обе реплики есть - сравниваем время
+                let timeDiff = abs(left.startTime - right.startTime)
+
+                if timeDiff <= timeTolerance {
+                    // Реплики близко по времени - объединяем в одну строку
+                    let avgTime = (left.startTime + right.startTime) / 2
+                    rows.append(SyncedRow(leftTurn: left, rightTurn: right, timestamp: avgTime))
+                    leftIndex += 1
+                    rightIndex += 1
+                } else if left.startTime < right.startTime {
+                    // Левая реплика раньше
+                    rows.append(SyncedRow(leftTurn: left, rightTurn: nil, timestamp: left.startTime))
+                    leftIndex += 1
+                } else {
+                    // Правая реплика раньше
+                    rows.append(SyncedRow(leftTurn: nil, rightTurn: right, timestamp: right.startTime))
+                    rightIndex += 1
+                }
+            } else if let left = leftTurn {
+                // Только левая реплика осталась
+                rows.append(SyncedRow(leftTurn: left, rightTurn: nil, timestamp: left.startTime))
+                leftIndex += 1
+            } else if let right = rightTurn {
+                // Только правая реплика осталась
+                rows.append(SyncedRow(leftTurn: nil, rightTurn: right, timestamp: right.startTime))
+                rightIndex += 1
+            }
+        }
+
+        return rows
+    }
+
+    // Вычисляет промежуток тишины между строками
+    private func calculateGap(from currentRow: SyncedRow, to nextRow: SyncedRow) -> TimeInterval? {
+        // Находим максимальное endTime в текущей строке
+        var maxEndTime: TimeInterval = 0
+        if let left = currentRow.leftTurn {
+            maxEndTime = max(maxEndTime, left.endTime)
+        }
+        if let right = currentRow.rightTurn {
+            maxEndTime = max(maxEndTime, right.endTime)
+        }
+
+        // Находим минимальное startTime в следующей строке
+        var minStartTime: TimeInterval = .greatestFiniteMagnitude
+        if let left = nextRow.leftTurn {
+            minStartTime = min(minStartTime, left.startTime)
+        }
+        if let right = nextRow.rightTurn {
+            minStartTime = min(minStartTime, right.startTime)
+        }
+
+        let gap = minStartTime - maxEndTime
+
+        // Показываем индикатор только для значительных промежутков (>1 секунда)
+        return gap > 1.0 ? gap : nil
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Заголовки колонок
+                HStack(spacing: 8) {
+                    Text("Speaker 1")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Color.speaker1Accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(Color.speaker1Background)
+                        .cornerRadius(6)
+
+                    Text("Speaker 2")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Color.speaker2Accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(Color.speaker2Background)
+                        .cornerRadius(6)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+
+                // DEBUG: Показываем текущее время воспроизведения
+                if audioPlayer.isPlaying {
+                    HStack {
+                        Image(systemName: "play.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.system(size: 10))
+                        Text("Playing: \(String(format: "%.2f", audioPlayer.currentTime))s")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.green)
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(4)
+                    .padding(.horizontal, 12)
+                }
+
+                // Синхронизированные реплики - реплики на одном уровне по времени
+                VStack(spacing: 0) {
+                    ForEach(Array(syncedRows.enumerated()), id: \.offset) { index, row in
+                        HStack(alignment: .top, spacing: 8) {
+                            // Левая колонка
+                            if let leftTurn = row.leftTurn {
+                                CompactTurnCard(
+                                    turn: leftTurn,
+                                    speaker: .left,
+                                    audioPlayer: audioPlayer,
+                                    durationBarScale: durationBarScale
+                                )
+                                .frame(maxWidth: .infinity)
+                            } else {
+                                Color.clear
+                                    .frame(maxWidth: .infinity)
+                            }
+
+                            // Правая колонка
+                            if let rightTurn = row.rightTurn {
+                                CompactTurnCard(
+                                    turn: rightTurn,
+                                    speaker: .right,
+                                    audioPlayer: audioPlayer,
+                                    durationBarScale: durationBarScale
+                                )
+                                .frame(maxWidth: .infinity)
+                            } else {
+                                Color.clear
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+
+                        // Индикатор промежутка до следующей строки
+                        if index < syncedRows.count - 1 {
+                            let nextRow = syncedRows[index + 1]
+                            if let gap = calculateGap(from: row, to: nextRow) {
+                                SilenceIndicator(duration: gap, scale: durationBarScale)
+                                    .padding(.horizontal, 12)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+    }
+
+    // Вычисляет промежуток тишины перед репликой (в рамках одного канала)
+    private func getSilenceGapBefore(turn: DialogueTranscription.Turn, in turns: [DialogueTranscription.Turn]) -> TimeInterval? {
+        // Находим предыдущую реплику того же спикера
+        let sameChannelTurns = turns.filter { $0.speaker == turn.speaker }
+        guard let currentIndex = sameChannelTurns.firstIndex(where: { $0.id == turn.id }), currentIndex > 0 else {
+            return nil
+        }
+
+        let previousTurn = sameChannelTurns[currentIndex - 1]
+        let gap = turn.startTime - previousTurn.endTime
+
+        // Показываем индикатор только для значительных промежутков (>2 секунд)
+        return gap > 2.0 ? gap : nil
+    }
+}
+
+/// Индикатор промежутка тишины
+struct SilenceIndicator: View {
+    let duration: TimeInterval
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 4) {
+            // Пунктирная линия
+            Rectangle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: 2, height: min(CGFloat(duration) * scale, 20))
+                .overlay(
+                    Rectangle()
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                        .foregroundColor(.gray.opacity(0.5))
+                )
+
+            // Время промежутка
+            Text("⋯ \(formatDuration(duration))")
+                .font(.system(size: 8))
+                .foregroundColor(.secondary.opacity(0.6))
+        }
+        .padding(.vertical, 2)
+        .padding(.leading, 4)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        if seconds < 60 {
+            return String(format: "%.1fs", seconds)
+        } else {
+            let mins = Int(seconds) / 60
+            let secs = Int(seconds) % 60
+            return String(format: "%dm %ds", mins, secs)
+        }
+    }
+}
+
+/// Компактная карточка реплики с индикатором длительности слева
+struct CompactTurnCard: View {
+    let turn: DialogueTranscription.Turn
+    let speaker: DialogueTranscription.Turn.Speaker
+    @ObservedObject var audioPlayer: AudioPlayerManager
+    let durationBarScale: CGFloat
+
+    // Проверка активности
+    private var isPlaying: Bool {
+        audioPlayer.isPlaying &&
+        audioPlayer.currentTime >= turn.startTime &&
+        audioPlayer.currentTime <= turn.endTime
+    }
+
+    // Высота индикатора длительности (ограничена 60px максимум)
+    private var durationBarHeight: CGFloat {
+        min(max(CGFloat(turn.duration) * durationBarScale, 10), 60)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            // Цветная полоска длительности слева
+            VStack(spacing: 2) {
+                Rectangle()
+                    .fill(speaker == .left ? Color.speaker1Accent : Color.speaker2Accent)
+                    .frame(width: 3, height: durationBarHeight)
+                    .cornerRadius(1.5)
+
+                // Время начала
+                Text(formatTime(turn.startTime))
+                    .font(.system(size: 7, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+            .frame(height: durationBarHeight + 12)  // Фиксированная высота для VStack
+
+            // Контент реплики
+            VStack(alignment: .leading, spacing: 4) {
+                // Заголовок: длительность
+                Text(formatDuration(turn.duration))
+                    .font(.system(size: 8))
+                    .foregroundColor(.secondary)
+
+                // Текст реплики - полное развертывание без ограничений
+                Text(turn.text)
+                    .font(.system(size: 11))
+                    .foregroundColor(.primary)
+                    .lineLimit(nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(speaker == .left ? Color.speaker1Background : Color.speaker2Background)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(
+                                isPlaying ? (speaker == .left ? Color.speaker1Accent : Color.speaker2Accent) : Color.clear,
+                                lineWidth: 2
+                            )
+                    )
+            )
+        }
+        .padding(.vertical, 2)
+        .onTapGesture {
+            // Клик → переход к времени реплики в аудио
+            audioPlayer.seek(to: turn.startTime)
+        }
+    }
+
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        return String(format: "%.1fs", seconds)
+    }
+}
+
+/// Карточка реплики для timeline view
+struct TimelineTurnCard: View {
+    let turn: DialogueTranscription.Turn
+    let speaker: DialogueTranscription.Turn.Speaker
+    @ObservedObject var audioPlayer: AudioPlayerManager
+
+    private var isPlaying: Bool {
+        audioPlayer.isPlaying &&
+        audioPlayer.currentTime >= turn.startTime &&
+        audioPlayer.currentTime <= turn.endTime
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Время (с DEBUG информацией)
+            HStack {
+                Text("\(formatTime(turn.startTime)) - \(formatTime(turn.endTime))")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Text(formatDuration(turn.duration))
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+
+            // Текст
+            Text(turn.text)
+                .font(.system(size: 12))
+                .foregroundColor(.primary)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(speaker == .left ? Color.blue.opacity(0.1) : Color.orange.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(
+                                    isPlaying ? (speaker == .left ? Color.blue : Color.orange) : Color.clear,
+                                    lineWidth: 2
+                                )
+                        )
+                )
+                .onTapGesture {
+                    audioPlayer.seek(to: turn.startTime)
+                }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        return String(format: "%.1fs", seconds)
+    }
+}
+
+/// Компактное отображение диалога - реплики последовательно без привязки к абсолютному времени
+
+/// Временная шкала (ось времени) - с визуальным сжатием тишины
 struct TimelineAxis: View {
-    let totalDuration: TimeInterval
+    let totalDuration: TimeInterval  // визуальная длительность (сжатая)
     let pixelsPerSecond: CGFloat
+    let timelineMapper: CompressedTimelineMapper
+    let realDuration: TimeInterval  // реальная длительность
 
     var body: some View {
         GeometryReader { geometry in
@@ -628,10 +1131,56 @@ struct TimelineAxis: View {
                     .frame(width: 2)
                     .offset(x: 48)
 
-                // Временные метки каждые 10 секунд (или чаще для коротких файлов)
-                ForEach(timeMarks, id: \.self) { time in
+                // Индикаторы сжатых участков (более заметные)
+                ForEach(Array(timelineMapper.silenceGaps.enumerated()), id: \.offset) { index, gap in
+                    let visualStart = timelineMapper.visualPosition(for: gap.realStartTime)
+                    let visualEnd = timelineMapper.visualPosition(for: gap.realEndTime)
+                    let visualMid = (visualStart + visualEnd) / 2
+                    let savedSeconds = gap.duration - timelineMapper.compressedGapDisplay
+
+                    // Фон для индикатора (полупрозрачный прямоугольник)
+                    Rectangle()
+                        .fill(Color.orange.opacity(0.15))
+                        .frame(width: 50, height: CGFloat(visualEnd - visualStart) * pixelsPerSecond)
+                        .offset(y: CGFloat(visualStart) * pixelsPerSecond)
+
+                    // Пунктирная линия для сжатого участка (более толстая)
+                    Path { path in
+                        let startY = CGFloat(visualStart) * pixelsPerSecond
+                        let endY = CGFloat(visualEnd) * pixelsPerSecond
+                        path.move(to: CGPoint(x: 48, y: startY))
+                        path.addLine(to: CGPoint(x: 48, y: endY))
+                    }
+                    .stroke(style: StrokeStyle(lineWidth: 3, dash: [4, 4]))
+                    .foregroundColor(.orange.opacity(0.8))
+
+                    // Индикатор сжатия с информацией
+                    ZStack {
+                        // Фон для текста
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.orange.opacity(0.9))
+                            .frame(width: 46, height: 28)
+
+                        VStack(spacing: 0) {
+                            // Иконка сжатия
+                            Text("⇅")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                            // Сохраненное время
+                            Text("-\(Int(savedSeconds))s")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    }
+                    .offset(x: 25, y: CGFloat(visualMid) * pixelsPerSecond - 14)
+                }
+
+                // Временные метки (используем реальное время для меток)
+                ForEach(timeMarks, id: \.self) { realTime in
+                    let visualTime = timelineMapper.visualPosition(for: realTime)
+
                     HStack(spacing: 4) {
-                        Text(formatTime(time))
+                        Text(formatTime(realTime))  // Показываем реальное время
                             .font(.system(size: 9, weight: .medium))
                             .foregroundColor(.secondary)
                             .frame(width: 40, alignment: .trailing)
@@ -641,7 +1190,7 @@ struct TimelineAxis: View {
                             .fill(Color.gray.opacity(0.5))
                             .frame(width: 6, height: 1)
                     }
-                    .offset(y: CGFloat(time) * pixelsPerSecond - 6)
+                    .offset(y: CGFloat(visualTime) * pixelsPerSecond - 6)
                 }
             }
             .frame(height: CGFloat(totalDuration) * pixelsPerSecond)
@@ -651,10 +1200,10 @@ struct TimelineAxis: View {
 
     private var timeMarks: [TimeInterval] {
         // Адаптивный интервал: для коротких файлов 5 секунд, для длинных 10
-        let interval: TimeInterval = totalDuration < 60 ? 5 : 10
+        let interval: TimeInterval = realDuration < 60 ? 5 : 10
         var marks: [TimeInterval] = [0]
         var current = interval
-        while current <= totalDuration {
+        while current <= realDuration {
             marks.append(current)
             current += interval
         }
@@ -672,9 +1221,10 @@ struct TimelineAxis: View {
 struct SpeakerColumn: View {
     let turns: [DialogueTranscription.Turn]
     let speaker: DialogueTranscription.Turn.Speaker
-    let totalDuration: TimeInterval
+    let totalDuration: TimeInterval  // визуальная длительность (сжатая)
     let pixelsPerSecond: CGFloat
     @ObservedObject var audioPlayer: AudioPlayerManager
+    let timelineMapper: CompressedTimelineMapper
 
     var body: some View {
         GeometryReader { geometry in
@@ -695,10 +1245,12 @@ struct SpeakerColumn: View {
                     Spacer()
                 }
 
-                // Реплики, расположенные по времени (диалог уже сжат, используем startTime напрямую)
+                // Реплики, расположенные по ВИЗУАЛЬНОМУ времени (с учетом сжатия)
                 ForEach(turns) { turn in
+                    let visualStartTime = timelineMapper.visualPosition(for: turn.startTime)
+
                     TurnBlock(turn: turn, speaker: speaker, audioPlayer: audioPlayer)
-                        .offset(y: CGFloat(turn.startTime) * pixelsPerSecond + 30) // +30 для заголовка
+                        .offset(y: CGFloat(visualStartTime) * pixelsPerSecond + 30) // +30 для заголовка
                         .padding(.horizontal, 8)
                 }
             }
@@ -813,6 +1365,28 @@ struct AudioPlayerView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
 
+                // Контрол скорости воспроизведения
+                HStack(spacing: 4) {
+                    Image(systemName: "gauge.medium")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                        Button(action: {
+                            audioPlayer.setPlaybackRate(Float(rate))
+                        }) {
+                            Text(formatRate(rate))
+                                .font(.system(size: 9, weight: abs(audioPlayer.playbackRate - Float(rate)) < 0.01 ? .bold : .regular))
+                                .foregroundColor(abs(audioPlayer.playbackRate - Float(rate)) < 0.01 ? .blue : .secondary)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(abs(audioPlayer.playbackRate - Float(rate)) < 0.01 ? Color.blue.opacity(0.15) : Color.clear)
+                                .cornerRadius(3)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+
                 // Текущее время
                 Text(formatTime(audioPlayer.currentTime))
                     .font(.system(size: 11, design: .monospaced))
@@ -837,6 +1411,24 @@ struct AudioPlayerView: View {
                     ), in: 0...1)
                     .frame(width: 60)
                 }
+
+                // Усиление громкости (Boost) - для тихих записей
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform.badge.plus")
+                        .font(.system(size: 12))
+                        .foregroundColor(audioPlayer.volumeBoost > 1.0 ? .orange : .secondary)
+
+                    Slider(value: Binding(
+                        get: { Double(audioPlayer.volumeBoost) },
+                        set: { audioPlayer.setVolumeBoost(Float($0)) }
+                    ), in: 1...4)
+                    .frame(width: 60)
+
+                    Text("\(Int(audioPlayer.volumeBoost * 100))%")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(audioPlayer.volumeBoost > 1.0 ? .orange : .secondary)
+                        .frame(width: 35, alignment: .trailing)
+                }
             }
         }
         .padding(8)
@@ -848,6 +1440,14 @@ struct AudioPlayerView: View {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+
+    private func formatRate(_ rate: Double) -> String {
+        if rate == 1.0 {
+            return "1×"
+        } else {
+            return String(format: "%.2g×", rate)
+        }
     }
 }
 

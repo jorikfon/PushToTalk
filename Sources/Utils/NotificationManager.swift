@@ -10,14 +10,14 @@ public class NotificationManager: NSObject {
 
     private override init() {
         super.init()
-        print("NotificationManager: Инициализация")
+        LogManager.app.info("NotificationManager: Инициализация")
     }
 
     /// Запрос разрешения на отправку уведомлений
     public func requestPermission() async -> Bool {
         // Проверяем что bundle доступен
         guard Bundle.main.bundleIdentifier != nil else {
-            print("NotificationManager: ⚠️ Bundle недоступен, пропускаем запрос разрешений")
+            LogManager.app.warning("NotificationManager: Bundle недоступен, пропускаем запрос разрешений")
             return false
         }
 
@@ -28,14 +28,14 @@ public class NotificationManager: NSObject {
             }
 
             if granted {
-                print("NotificationManager: ✓ Разрешение на уведомления получено")
+                LogManager.app.success("NotificationManager: Разрешение на уведомления получено")
             } else {
-                print("NotificationManager: ⚠️ Разрешение на уведомления отклонено")
+                LogManager.app.warning("NotificationManager: Разрешение на уведомления отклонено")
             }
 
             return granted
         } catch {
-            print("NotificationManager: ✗ Ошибка запроса разрешения: \(error)")
+            LogManager.app.failure("NotificationManager: Запрос разрешения", error: error)
             return false
         }
     }

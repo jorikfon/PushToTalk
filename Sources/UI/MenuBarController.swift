@@ -16,7 +16,7 @@ public class MenuBarController: ObservableObject {
     public var modelChangedCallback: ((String) -> Void)?
 
     public init() {
-        print("MenuBarController: Инициализация")
+        LogManager.app.info("MenuBarController: Инициализация")
     }
 
     /// Настройка menu bar элемента
@@ -33,7 +33,7 @@ public class MenuBarController: ObservableObject {
         // Создаем контроллер окна настроек
         settingsWindowController = SettingsWindowController(menuBarController: self)
 
-        print("MenuBarController: ✓ Menu bar настроен")
+        LogManager.app.success("MenuBarController: Menu bar настроен")
     }
 
     /// Показать выпадающее меню при клике на иконку

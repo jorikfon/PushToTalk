@@ -386,7 +386,17 @@ public class FileTranscriptionService {
         return 1
     }
 
+    /// Структура для хранения сегмента с привязкой к каналу
+    private struct ChannelSegment {
+        let segment: SpeechSegment
+        let channel: Int  // 0 = left, 1 = right
+        let speaker: DialogueTranscription.Turn.Speaker
+        let audioSamples: [Float]
+    }
+
     /// Транскрибирует стерео файл как диалог (левый и правый каналы отдельно)
+    /// УЛУЧШЕННЫЙ АЛГОРИТМ: обрабатывает сегменты в шахматном порядке по времени,
+    /// используя предыдущий диалог как контекст для улучшения качества распознавания
     private func transcribeStereoAsDialogue(url: URL) async throws -> DialogueTranscription {
         LogManager.app.info("🎧 Стерео режим: разделяем каналы для определения дикторов")
 
@@ -409,22 +419,61 @@ public class FileTranscriptionService {
         let rightSegments = detectSegments(in: rightChannel)
         LogManager.app.info("Найдено \(rightSegments.count) сегментов речи в правом канале")
 
-        // 5. Транскрибируем каждый сегмент отдельно
+        // 5. НОВОЕ: Объединяем сегменты из обоих каналов с привязкой к каналу
+        var allSegments: [ChannelSegment] = []
+
+        // Добавляем левые сегменты
+        for segment in leftSegments {
+            let audio = extractSegmentAudio(segment, from: leftChannel)
+            allSegments.append(ChannelSegment(
+                segment: segment,
+                channel: 0,
+                speaker: .left,
+                audioSamples: audio
+            ))
+        }
+
+        // Добавляем правые сегменты
+        for segment in rightSegments {
+            let audio = extractSegmentAudio(segment, from: rightChannel)
+            allSegments.append(ChannelSegment(
+                segment: segment,
+                channel: 1,
+                speaker: .right,
+                audioSamples: audio
+            ))
+        }
+
+        // 6. НОВОЕ: Сортируем по времени (шахматный порядок)
+        allSegments.sort { $0.segment.startTime < $1.segment.startTime }
+        LogManager.app.info("🔄 Сегменты отсортированы по времени для последовательной обработки (\(allSegments.count) всего)")
+
+        // 7. НОВОЕ: Транскрибируем в шахматном порядке с контекстом
         var turns: [DialogueTranscription.Turn] = []
-        let totalSegments = leftSegments.count + rightSegments.count
+        let totalSegments = allSegments.count
         var processedSegments = 0
 
-        // Транскрибируем левый канал (Speaker 1)
-        for segment in leftSegments {
-            let segmentAudio = extractSegmentAudio(segment, from: leftChannel)
+        for channelSegment in allSegments {
+            let segment = channelSegment.segment
+            let speaker = channelSegment.speaker
+            let segmentAudio = channelSegment.audioSamples
 
             if !SilenceDetector.shared.isSilence(segmentAudio) {
-                LogManager.app.info("Транскрибируем Speaker 1: \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s")
-                let text = try await whisperService.transcribe(audioSamples: segmentAudio)
+                // НОВОЕ: Формируем контекст из последних N реплик (например, 5)
+                let contextPrompt = buildContextPrompt(from: turns, maxTurns: 5)
+
+                let speakerName = speaker == .left ? "Speaker 1" : "Speaker 2"
+                LogManager.app.info("Транскрибируем \(speakerName): \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s (контекст: \(contextPrompt.isEmpty ? "нет" : "\(contextPrompt.count) символов"))")
+
+                // НОВОЕ: Передаем контекст в Whisper
+                let text = try await whisperService.transcribe(
+                    audioSamples: segmentAudio,
+                    contextPrompt: contextPrompt.isEmpty ? nil : contextPrompt
+                )
 
                 if !text.isEmpty {
                     turns.append(DialogueTranscription.Turn(
-                        speaker: .left,
+                        speaker: speaker,
                         text: text,
                         startTime: segment.startTime,
                         endTime: segment.endTime
@@ -437,42 +486,40 @@ public class FileTranscriptionService {
                     LogManager.app.debug("Обновление прогресса: \(processedSegments)/\(totalSegments), turns: \(turns.count)")
                     onProgressUpdate?(url.lastPathComponent, progress, partialDialogue)
                 } else {
-                    LogManager.app.warning("Speaker 1: пустой текст для сегмента \(String(format: "%.1f", segment.startTime))s")
+                    LogManager.app.warning("\(speakerName): пустой текст для сегмента \(String(format: "%.1f", segment.startTime))s")
                 }
             }
         }
 
-        // Транскрибируем правый канал (Speaker 2)
-        for segment in rightSegments {
-            let segmentAudio = extractSegmentAudio(segment, from: rightChannel)
-
-            if !SilenceDetector.shared.isSilence(segmentAudio) {
-                LogManager.app.info("Транскрибируем Speaker 2: \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s")
-                let text = try await whisperService.transcribe(audioSamples: segmentAudio)
-
-                if !text.isEmpty {
-                    turns.append(DialogueTranscription.Turn(
-                        speaker: .right,
-                        text: text,
-                        startTime: segment.startTime,
-                        endTime: segment.endTime
-                    ))
-
-                    // Обновляем прогресс после каждой реплики
-                    processedSegments += 1
-                    let progress = Double(processedSegments) / Double(totalSegments)
-                    let partialDialogue = DialogueTranscription(turns: turns, isStereo: true, totalDuration: totalDuration)
-                    LogManager.app.debug("Обновление прогресса: \(processedSegments)/\(totalSegments), turns: \(turns.count)")
-                    onProgressUpdate?(url.lastPathComponent, progress, partialDialogue)
-                } else {
-                    LogManager.app.warning("Speaker 2: пустой текст для сегмента \(String(format: "%.1f", segment.startTime))s")
-                }
-            }
-        }
-
-        LogManager.app.success("Стерео транскрипция завершена: \(turns.count) реплик (\(leftSegments.count) левых, \(rightSegments.count) правых)")
+        LogManager.app.success("Стерео транскрипция завершена: \(turns.count) реплик (обработаны в хронологическом порядке)")
 
         return DialogueTranscription(turns: turns, isStereo: true, totalDuration: totalDuration)
+    }
+
+    /// НОВОЕ: Формирует контекстный промпт из предыдущих реплик диалога
+    /// Помогает Whisper лучше распознавать имена, термины и контекст разговора
+    private func buildContextPrompt(from turns: [DialogueTranscription.Turn], maxTurns: Int = 5) -> String {
+        // Берем последние N реплик
+        let recentTurns = Array(turns.suffix(maxTurns))
+
+        if recentTurns.isEmpty {
+            return ""
+        }
+
+        // Формируем контекст в виде диалога
+        let context = recentTurns.map { turn in
+            let speakerName = turn.speaker == .left ? "Speaker 1" : "Speaker 2"
+            return "\(speakerName): \(turn.text)"
+        }.joined(separator: " ")
+
+        // Ограничиваем длину контекста (примерно 200-300 символов оптимально)
+        let maxLength = 300
+        if context.count > maxLength {
+            let endIndex = context.index(context.startIndex, offsetBy: maxLength)
+            return String(context[..<endIndex]) + "..."
+        }
+
+        return context
     }
 
     /// Загружает стерео аудио (сохраняя оба канала)

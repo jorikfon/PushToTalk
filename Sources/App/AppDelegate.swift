@@ -164,9 +164,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 5. Настройка уведомлений для тестовой записи
         setupTestRecordingNotifications()
 
-        // 6. Настройка уведомлений для отладки Bluetooth
-        setupDebugNotifications()
-
         LogManager.app.success("Инициализация завершена")
     }
 
@@ -189,27 +186,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         LogManager.app.info("Test recording notifications настроены")
-    }
-
-    /// Настройка уведомлений для отладки Bluetooth / AirPods режимов
-    private func setupDebugNotifications() {
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("DebugStartEngine"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            // self?.audioService?.debugStartEngine()  // TODO: Добавить метод debugStartEngine
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("DebugStopEngine"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            // self?.audioService?.debugStopEngine()  // TODO: Добавить метод debugStopEngine
-        }
-
-        LogManager.app.info("Debug notifications настроены")
     }
 
     /// Проверка всех необходимых разрешений
@@ -419,15 +395,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hotkey = HotkeyManager.shared.currentHotkey.displayName
         LogManager.app.info("=== \(hotkey) Released ===")
 
-        // Логируем Bluetooth профиль ПЕРЕД остановкой записи (если используется Bluetooth)
-        // TODO: Добавить проверку Bluetooth устройства когда добавим свойство isBluetooth
-        /*
-        if let selectedDevice = audioDeviceManager.getSelectedDeviceOrDefault(), selectedDevice.isBluetooth {
-            LogManager.app.info("📱 Bluetooth устройство ДО stopRecording: \(selectedDevice.name)")
-            BluetoothProfileMonitor.shared.logCurrentProfile(for: selectedDevice)
-        }
-        */
-
         // Останавливаем таймер
         stopRecordingTimer()
 
@@ -439,18 +406,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             floatingWindow?.hide()  // Закрываем окно при ошибке
             return
         }
-
-        // Логируем Bluetooth профиль ПОСЛЕ остановки записи (с небольшой задержкой)
-        // TODO: Добавить проверку Bluetooth устройства когда добавим свойство isBluetooth
-        /*
-        if let selectedDevice = audioDeviceManager.getSelectedDeviceOrDefault(), selectedDevice.isBluetooth {
-            // Даём macOS немного времени (0.5s) для переключения Bluetooth профиля
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                LogManager.app.info("📱 Bluetooth профиль ПОСЛЕ stopRecording (через 0.5s):")
-                BluetoothProfileMonitor.shared.logCurrentProfile(for: selectedDevice)
-            }
-        }
-        */
 
         menuBarController?.updateIcon(recording: false)
         SoundManager.shared.play(.recordingStopped)
@@ -673,13 +628,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // Используем нормализованный файл для транскрипции (лучшее качество)
                 let dialogue = try await service.transcribeFileWithDialogue(at: normalizedURL)
 
-                // Убираем периоды тишины (где оба молчат) и пересчитываем временные метки
-                let compressedDialogue = dialogue.removesilencePeriods(minGap: 2.0)
+                // ВАЖНО: НЕ сжимаем тишину, т.к. временные метки должны соответствовать реальному времени в файле!
+                // Иначе AudioPlayerManager воспроизводит оригинальный файл, а реплики подсвечиваются не синхронно
+                // let compressedDialogue = dialogue.removesilencePeriods(minGap: 2.0)
 
                 await MainActor.run {
                     // Финальное обновление диалога с ОРИГИНАЛЬНЫМ URL для плеера
-                    window.viewModel.updateDialogue(file: fileName, dialogue: compressedDialogue, fileURL: fileURL)
-                    LogManager.app.success("Файл транскрибирован: \(fileName) (\(compressedDialogue.isStereo ? "стерео диалог" : "моно"), сжато: \(String(format: "%.1f", dialogue.totalDuration))s -> \(String(format: "%.1f", compressedDialogue.totalDuration))s)")
+                    window.viewModel.updateDialogue(file: fileName, dialogue: dialogue, fileURL: fileURL)
+                    LogManager.app.success("Файл транскрибирован: \(fileName) (\(dialogue.isStereo ? "стерео диалог" : "моно"), \(dialogue.turns.count) реплик, \(String(format: "%.1f", dialogue.totalDuration))s)")
                 }
 
                 // Удаляем временный нормализованный файл после транскрипции
@@ -762,15 +718,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         LogManager.app.info("=== PushToTalk Terminating ===")
 
-        // Логируем текущий Bluetooth профиль перед выходом (если используется Bluetooth устройство)
-        // TODO: Добавить проверку Bluetooth устройства когда добавим свойство isBluetooth
-        /*
-        if let selectedDevice = audioDeviceManager.getSelectedDeviceOrDefault(), selectedDevice.isBluetooth {
-            LogManager.app.info("📱 Текущее Bluetooth устройство: \(selectedDevice.name)")
-            BluetoothProfileMonitor.shared.logCurrentProfile(for: selectedDevice)
-        }
-        */
-
         // Останавливаем таймер записи
         stopRecordingTimer()
 
@@ -784,27 +731,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Останавливаем мониторинг Bluetooth профиля
         // BluetoothProfileMonitor.shared.stopMonitoring()
 
-        // ВАЖНО: Восстанавливаем громкость системы, если она была приглушена
-        // TODO: Исправить scope issues с audioDuckingManager
-        /*
-        if audioDuckingManager.isDucked {
-            LogManager.app.warning("Приложение закрывается с активным ducking - форсируем восстановление громкости")
-            // Используем прямое восстановление без задержек для немедленного эффекта
-            audioDuckingManager.forceUnduck()
-        }
-        */
-
         // Восстанавливаем громкость микрофона
         // micVolumeManager.restoreMicrophoneVolume()  // TODO: Исправить scope ошибку
-
-        // Логируем финальный Bluetooth профиль после cleanup (для отладки)
-        // TODO: Добавить проверку Bluetooth устройства когда добавим свойство isBluetooth
-        /*
-        if let selectedDevice = audioDeviceManager.getSelectedDeviceOrDefault(), selectedDevice.isBluetooth {
-            LogManager.app.info("📱 Bluetooth профиль ПОСЛЕ cleanup:")
-            BluetoothProfileMonitor.shared.logCurrentProfile(for: selectedDevice)
-        }
-        */
 
         LogManager.app.info("=== Cleanup завершен ===")
     }

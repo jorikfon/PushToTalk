@@ -30,8 +30,8 @@ public class ModelManager: ObservableObject {
         // Создаём директорию если не существует
         try? FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
 
-        print("ModelManager: Инициализация")
-        print("ModelManager: Директория моделей: \(modelDirectory.path)")
+        LogManager.app.info("ModelManager: Инициализация")
+        LogManager.app.info("ModelManager: Директория моделей: \(self.modelDirectory.path)")
 
         // Загружаем текущую модель из настроек
         loadCurrentModel()
@@ -51,12 +51,12 @@ public class ModelManager: ObservableObject {
     public func saveCurrentModel(_ model: String) {
         currentModel = model
         UserDefaults.standard.set(model, forKey: "currentWhisperModel")
-        print("ModelManager: Текущая модель изменена на \(model)")
+        LogManager.app.info("ModelManager: Текущая модель изменена на \(model)")
     }
 
     /// Сканирование загруженных моделей
     public func scanDownloadedModels() {
-        print("ModelManager: Сканирование загруженных моделей...")
+        LogManager.app.info("ModelManager: Сканирование загруженных моделей...")
 
         // Запускаем асинхронную проверку
         Task {
@@ -67,13 +67,13 @@ public class ModelManager: ObservableObject {
                 let isAvailable = await checkModelAvailability(model.name)
                 if isAvailable {
                     foundModels.append(model.name)
-                    print("ModelManager: ✓ Модель \(model.name) доступна")
+                    LogManager.app.info("ModelManager: Модель \(model.name) доступна")
                 }
             }
 
             await MainActor.run {
                 self.downloadedModels = foundModels
-                print("ModelManager: Найдено моделей: \(foundModels.count) - \(foundModels)")
+                LogManager.app.info("ModelManager: Найдено моделей: \(foundModels.count) - \(foundModels)")
             }
         }
     }
