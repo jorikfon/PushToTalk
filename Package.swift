@@ -6,14 +6,18 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         // WhisperKit для распознавания речи на Apple Silicon
-        .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.9.0")
+        .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.9.0"),
+        // MediaRemote Private API для управления медиа-плеерами
+        .package(url: "https://github.com/PrivateFrameworks/MediaRemote.git", from: "0.1.0")
     ],
     targets: [
         // Библиотека с общими компонентами
         .target(
             name: "PushToTalkCore",
             dependencies: [
-                .product(name: "WhisperKit", package: "WhisperKit")
+                .product(name: "WhisperKit", package: "WhisperKit"),
+                .product(name: "PrivateMediaRemote", package: "MediaRemote"),
+                .product(name: "MediaRemote", package: "MediaRemote")
             ],
             path: "Sources",
             exclude: [
@@ -23,6 +27,7 @@ let package = Package(
                 "keyboard_monitor_test.swift",
                 "text_inserter_test.swift",
                 "performance_benchmark.swift",
+                "vad_test.swift",
                 "App/PushToTalkApp.swift",
                 "App/AppDelegate.swift"
             ]
@@ -87,6 +92,14 @@ let package = Package(
             dependencies: ["PushToTalkCore"],
             path: "Sources",
             sources: ["performance_benchmark.swift"]
+        ),
+
+        // VAD Test - тестирование алгоритмов Voice Activity Detection
+        .executableTarget(
+            name: "VADTest",
+            dependencies: ["PushToTalkCore"],
+            path: "Sources",
+            sources: ["vad_test.swift"]
         ),
 
         // Unit тесты

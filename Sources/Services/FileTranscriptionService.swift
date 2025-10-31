@@ -75,6 +75,65 @@ public struct DialogueTranscription {
         let millis = Int((seconds.truncatingRemainder(dividingBy: 1)) * 1000)
         return String(format: "%02d:%02d.%03d", minutes, secs, millis)
     }
+
+    /// Убирает периоды тишины (где оба спикера молчат) и пересчитывает временные метки
+    /// Минимальный промежуток тишины для удаления: 2 секунды
+    public func removesilencePeriods(minGap: TimeInterval = 2.0) -> DialogueTranscription {
+        guard !turns.isEmpty else { return self }
+
+        // Сортируем реплики по времени
+        let sorted = sortedByTime
+
+        var compressedTurns: [Turn] = []
+        var currentTime: TimeInterval = 0
+
+        for (index, turn) in sorted.enumerated() {
+            let turnDuration = turn.endTime - turn.startTime
+
+            if index == 0 {
+                // Первая реплика начинается с 0
+                compressedTurns.append(Turn(
+                    speaker: turn.speaker,
+                    text: turn.text,
+                    startTime: currentTime,
+                    endTime: currentTime + turnDuration
+                ))
+                currentTime += turnDuration
+            } else {
+                // Проверяем промежуток с предыдущей репликой
+                let previousTurn = sorted[index - 1]
+                let gap = turn.startTime - previousTurn.endTime
+
+                // Добавляем паузу только если она меньше минимального порога
+                // Иначе это тишина, которую нужно убрать
+                if gap < minGap {
+                    currentTime += gap
+                } else {
+                    // Добавляем небольшую паузу (0.5 сек) вместо длинной тишины
+                    currentTime += 0.5
+                }
+
+                compressedTurns.append(Turn(
+                    speaker: turn.speaker,
+                    text: turn.text,
+                    startTime: currentTime,
+                    endTime: currentTime + turnDuration
+                ))
+                currentTime += turnDuration
+            }
+        }
+
+        // Новая общая длительность - это время окончания последней реплики
+        let newTotalDuration = compressedTurns.last?.endTime ?? 0
+
+        LogManager.app.info("Сжатие диалога: \(String(format: "%.1f", totalDuration))s -> \(String(format: "%.1f", newTotalDuration))s (\(turns.count) реплик)")
+
+        return DialogueTranscription(
+            turns: compressedTurns,
+            isStereo: isStereo,
+            totalDuration: newTotalDuration
+        )
+    }
 }
 
 /// Сервис для транскрипции audio/video файлов
@@ -83,15 +142,34 @@ public class FileTranscriptionService {
 
     /// Режим транскрипции
     public enum TranscriptionMode {
-        case vad        // Использовать Voice Activity Detection (лучше для чистого аудио)
-        case batch      // Пакетная транскрипция фиксированными чанками (лучше для низкого качества)
+        case vad        // Использовать Voice Activity Detection (рекомендуется с SpectralVAD для телефонного аудио)
+        case batch      // Пакетная транскрипция фиксированными чанками (альтернативный метод)
+    }
+
+    /// Тип VAD алгоритма для режима .vad
+    public enum VADAlgorithm {
+        case standard(VADParameters)       // Стандартный энергетический VAD
+        case adaptive(AdaptiveVAD.Parameters)  // Адаптивный VAD с ZCR
+        case spectral(SpectralVAD.Parameters)  // Спектральный VAD (FFT)
+
+        /// Рекомендуемый для телефонного аудио
+        public static let telephone = VADAlgorithm.spectral(.telephone)
+
+        /// Рекомендуемый для широкополосного аудио
+        public static let wideband = VADAlgorithm.spectral(.wideband)
+
+        /// Стандартный
+        public static let `default` = VADAlgorithm.spectral(.default)
     }
 
     private let whisperService: WhisperService
     private var batchService: BatchTranscriptionService?
 
     /// Текущий режим транскрипции
-    public var mode: TranscriptionMode = .batch  // По умолчанию batch для телефонного аудио
+    public var mode: TranscriptionMode = .vad  // VAD режим с SpectralVAD для телефонного аудио
+
+    /// Алгоритм VAD (используется только в режиме .vad)
+    public var vadAlgorithm: VADAlgorithm = .telephone  // SpectralVAD - Telephone по умолчанию
 
     /// Callback для обновления промежуточных результатов (прогресс и реплики)
     public var onProgressUpdate: ((String, Double, DialogueTranscription?) -> Void)?
@@ -102,6 +180,41 @@ public class FileTranscriptionService {
             whisperService: whisperService,
             parameters: .lowQuality
         )
+        // Применяем настройки из UserSettings
+        applyUserSettings()
+    }
+
+    /// Применяет настройки VAD из UserSettings
+    public func applyUserSettings() {
+        let settings = UserSettings.shared
+
+        // Режим транскрипции
+        switch settings.fileTranscriptionMode {
+        case .vad:
+            mode = .vad
+        case .batch:
+            mode = .batch
+        }
+
+        // VAD алгоритм
+        switch settings.vadAlgorithmType {
+        case .spectralTelephone:
+            vadAlgorithm = .telephone
+        case .spectralWideband:
+            vadAlgorithm = .wideband
+        case .spectralDefault:
+            vadAlgorithm = .default
+        case .adaptiveLowQuality:
+            vadAlgorithm = .adaptive(.lowQuality)
+        case .adaptiveAggressive:
+            vadAlgorithm = .adaptive(.aggressive)
+        case .standardLowQuality:
+            vadAlgorithm = .standard(.lowQuality)
+        case .standardHighQuality:
+            vadAlgorithm = .standard(.highQuality)
+        }
+
+        LogManager.app.info("FileTranscriptionService: применены настройки - режим: \(self.mode == .vad ? "VAD" : "Batch"), алгоритм: \(self.vadAlgorithmName)")
     }
 
     /// Транскрибирует аудио/видео файл с поддержкой стерео разделения
@@ -110,7 +223,7 @@ public class FileTranscriptionService {
     /// - Throws: Ошибки загрузки или транскрипции
     public func transcribeFileWithDialogue(at url: URL) async throws -> DialogueTranscription {
         LogManager.app.begin("Транскрипция файла с определением дикторов: \(url.lastPathComponent)")
-        LogManager.app.info("Режим транскрипции: \(self.mode == .batch ? "BATCH" : "VAD")")
+        LogManager.app.info("Режим транскрипции: \(self.mode == .batch ? "BATCH" : "VAD (\(self.vadAlgorithmName))")")
 
         // Используем batch режим, если выбран
         if mode == .batch {
@@ -287,16 +400,13 @@ public class FileTranscriptionService {
         // 3. Определяем общую длительность
         let totalDuration = TimeInterval(leftChannel.count) / 16000.0
 
-        // 4. Используем VAD для определения сегментов речи в каждом канале
-        // Используем lowQuality параметры для лучшего распознавания телефонного аудио
-        let vad = VoiceActivityDetector(parameters: .lowQuality)
-
-        LogManager.app.info("🎤 VAD: анализ левого канала...")
-        let leftSegments = vad.detectSpeechSegments(in: leftChannel)
+        // 4. Используем выбранный VAD алгоритм для определения сегментов речи в каждом канале
+        LogManager.app.info("🎤 VAD: анализ левого канала (алгоритм: \(self.vadAlgorithmName))...")
+        let leftSegments = detectSegments(in: leftChannel)
         LogManager.app.info("Найдено \(leftSegments.count) сегментов речи в левом канале")
 
-        LogManager.app.info("🎤 VAD: анализ правого канала...")
-        let rightSegments = vad.detectSpeechSegments(in: rightChannel)
+        LogManager.app.info("🎤 VAD: анализ правого канала (алгоритм: \(self.vadAlgorithmName))...")
+        let rightSegments = detectSegments(in: rightChannel)
         LogManager.app.info("Найдено \(rightSegments.count) сегментов речи в правом канале")
 
         // 5. Транскрибируем каждый сегмент отдельно
@@ -306,7 +416,7 @@ public class FileTranscriptionService {
 
         // Транскрибируем левый канал (Speaker 1)
         for segment in leftSegments {
-            let segmentAudio = vad.extractAudio(for: segment, from: leftChannel)
+            let segmentAudio = extractSegmentAudio(segment, from: leftChannel)
 
             if !SilenceDetector.shared.isSilence(segmentAudio) {
                 LogManager.app.info("Транскрибируем Speaker 1: \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s")
@@ -334,7 +444,7 @@ public class FileTranscriptionService {
 
         // Транскрибируем правый канал (Speaker 2)
         for segment in rightSegments {
-            let segmentAudio = vad.extractAudio(for: segment, from: rightChannel)
+            let segmentAudio = extractSegmentAudio(segment, from: rightChannel)
 
             if !SilenceDetector.shared.isSilence(segmentAudio) {
                 LogManager.app.info("Транскрибируем Speaker 2: \(String(format: "%.1f", segment.startTime))s - \(String(format: "%.1f", segment.endTime))s")
@@ -437,6 +547,55 @@ public class FileTranscriptionService {
         LogManager.app.info("Канал \(channel): \(channelSamples.count) samples, \(String(format: "%.1f", durationSeconds))s")
 
         return channelSamples
+    }
+
+    // MARK: - VAD Helpers
+
+    /// Определяет сегменты речи с использованием выбранного алгоритма
+    private func detectSegments(in samples: [Float]) -> [SpeechSegment] {
+        switch vadAlgorithm {
+        case .standard(let params):
+            let vad = VoiceActivityDetector(parameters: params)
+            return vad.detectSpeechSegments(in: samples)
+
+        case .adaptive(let params):
+            let vad = AdaptiveVAD(parameters: params)
+            return vad.detectSpeechSegments(in: samples)
+
+        case .spectral(let params):
+            let vad = SpectralVAD(parameters: params)
+            return vad.detectSpeechSegments(in: samples)
+        }
+    }
+
+    /// Извлекает аудио для сегмента
+    private func extractSegmentAudio(_ segment: SpeechSegment, from samples: [Float]) -> [Float] {
+        let startIndex = max(0, segment.startSample)
+        let endIndex = min(samples.count, segment.endSample)
+
+        guard startIndex < endIndex && startIndex < samples.count else {
+            return []
+        }
+
+        return Array(samples[startIndex..<endIndex])
+    }
+
+    /// Возвращает название текущего VAD алгоритма для логирования
+    private var vadAlgorithmName: String {
+        switch vadAlgorithm {
+        case .standard:
+            return "Standard VAD"
+        case .adaptive:
+            return "Adaptive VAD"
+        case .spectral(let params):
+            if params.speechFreqMin == 300 && params.speechFreqMax == 3400 {
+                return "Spectral VAD (Telephone)"
+            } else if params.speechFreqMin == 80 && params.speechFreqMax == 8000 {
+                return "Spectral VAD (Wideband)"
+            } else {
+                return "Spectral VAD"
+            }
+        }
     }
 
 }

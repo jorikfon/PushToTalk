@@ -34,10 +34,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         LogManager.app.info("=== PushToTalk Starting ===")
 
-        // LSUIElement в Info.plist уже скрывает приложение из Dock
-        // НЕ устанавливаем activationPolicy, оставляем default (.regular)
-        // Это позволит applicationShouldTerminateAfterLastWindowClosed работать корректно
-
+        // Устанавливаем .accessory чтобы приложение было скрыто из Dock
+        // При открытии окна транскрипции переключимся на .regular
+        NSApp.setActivationPolicy(.accessory)
+        LogManager.app.info("Activation policy: .accessory (скрыто из Dock)")
 
         // Инициализация сервисов
         initializeServices()
@@ -51,6 +51,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Dock Visibility Management
+
+    /// Показывает приложение в Dock для возможности переключения на окно транскрипции
+    private func showInDock() {
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            LogManager.app.info("Приложение показано в Dock")
+        }
+    }
+
+    /// Скрывает приложение из Dock если нет открытых окон транскрипции
+    private func hideFromDockIfNoWindows() {
+        if fileTranscriptionWindows.isEmpty {
+            NSApp.setActivationPolicy(.accessory)
+            LogManager.app.info("Приложение скрыто из Dock (нет открытых окон)")
+        }
+    }
+
     // MARK: - Initialization
 
 
@@ -59,8 +78,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController = MenuBarController()
         audioService = AudioCaptureService()
 
-        // Используем сохраненную настройку модели из UserSettings
-        let modelSize = UserSettings.shared.whisperModelSize
+        // Используем сохраненную настройку модели из ModelManager
+        let modelSize = ModelManager.shared.currentModel
         whisperService = WhisperService(modelSize: modelSize)
         LogManager.app.info("Инициализация WhisperService с моделью из настроек: \(modelSize)")
 
@@ -100,6 +119,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.transcribeFilesCallback = { [weak self] files in
             guard let self = self else { return }
 
+            // Показываем приложение в Dock при открытии окна транскрипции
+            self.showInDock()
+
             // Создаём НОВОЕ окно для каждой транскрибации
             let newWindow = FileTranscriptionWindow()
 
@@ -110,6 +132,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             newWindow.onClose = { [weak self] window in
                 // Удаляем окно из массива когда оно закрывается
                 self?.fileTranscriptionWindows.removeAll { $0 === window }
+                // Скрываем из Dock если больше нет окон
+                self?.hideFromDockIfNoWindows()
             }
 
             DispatchQueue.main.async {
@@ -301,7 +325,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             try audioService?.startRecording()
             menuBarController?.updateIcon(recording: true)
-            floatingWindow?.showRecording()  // Показываем всплывающее окно
+
+            // Показываем всплывающее окно с таймером
+            let maxDuration = UserSettings.shared.maxRecordingDuration
+            floatingWindow?.showRecording(maxDuration: maxDuration)
+
             SoundManager.shared.play(.recordingStarted)
 
             // Запускаем таймер для автоматической остановки
@@ -318,8 +346,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             menuBarController?.showError(errorMessage)
 
-            // Восстанавливаем музыку и громкость микрофона при ошибке
-            let device = AudioDeviceManager.shared.selectedDevice
+            // Восстанавливаем медиа и громкость микрофона при ошибке
             audioDuckingManager.unduck()
             micVolumeManager.restoreMicrophoneVolume()
 
@@ -362,6 +389,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             // Показываем подсказку заново
                             floatingWindow?.updatePartialTranscription("")
 
+                            // Сбрасываем таймер
+                            floatingWindow?.resetTimer()
+
                             // Звуковой сигнал об отмене
                             SoundManager.shared.play(.recordingStopped)
                         }
@@ -403,9 +433,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard let audioData = audioService?.stopRecording() else {
             LogManager.app.failure("Остановка записи", message: "Нет аудио данных")
-            // Восстанавливаем музыку при ошибке
-            let device = AudioDeviceManager.shared.selectedDevice
+            // Восстанавливаем медиа и громкость микрофона при ошибке
             audioDuckingManager.unduck()
+            micVolumeManager.restoreMicrophoneVolume()
             floatingWindow?.hide()  // Закрываем окно при ошибке
             return
         }
@@ -425,11 +455,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.updateIcon(recording: false)
         SoundManager.shared.play(.recordingStopped)
 
-        // Сразу скрываем окно после отпускания кнопки
-        floatingWindow?.hide()
+        // Восстанавливаем медиа и громкость микрофона СРАЗУ после остановки записи
+        audioDuckingManager.unduck()
+        micVolumeManager.restoreMicrophoneVolume()
 
-        // Показываем состояние обработки
+        // Показываем состояние обработки с анимацией трансформации окна
         menuBarController?.updateProcessingState(true)
+        floatingWindow?.showProcessing()  // Анимирует трансформацию в компактный режим
 
         // Запускаем транскрипцию асинхронно
         Task {
@@ -447,11 +479,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             await MainActor.run {
                 menuBarController?.updateProcessingState(false)
-                floatingWindow?.showError("No speech detected (silence)")
+                floatingWindow?.hide()  // Скрываем компактное окно
                 SoundManager.shared.play(.transcriptionError)
-                let device = AudioDeviceManager.shared.selectedDevice
-                audioDuckingManager.unduck()
-                micVolumeManager.restoreMicrophoneVolume()
 
                 NotificationManager.shared.notifyError(
                     message: "No speech detected (silence)",
@@ -474,13 +503,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 LogManager.transcription.info("🛑 Обнаружено стоп-слово - текст не вставлен")
 
                 await MainActor.run {
-                    // Убираем иконку обработки
+                    // Убираем иконку обработки и скрываем компактное окно
                     menuBarController?.updateProcessingState(false)
-                    floatingWindow?.hide()  // Просто закрываем окно
+                    floatingWindow?.hide()  // Скрываем компактное окно
                     SoundManager.shared.play(.recordingStopped)  // Звук отмены
-                    let device = AudioDeviceManager.shared.selectedDevice
-                    audioDuckingManager.unduck()
-                    micVolumeManager.restoreMicrophoneVolume()
                 }
                 return
             }
@@ -495,13 +521,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // Добавляем в историю
                     TranscriptionHistory.shared.addTranscription(transcription, duration: duration)
 
-                    // Успех: убираем иконку обработки, воспроизводим звук, восстанавливаем музыку и микрофон
+                    // Успех: убираем иконку обработки, скрываем окно, воспроизводим звук
                     menuBarController?.updateProcessingState(false)
-                    floatingWindow?.showResult(transcription, duration: duration)  // Показываем результат
+                    floatingWindow?.hide()  // Скрываем компактное окно
                     SoundManager.shared.play(.transcriptionSuccess)
-                    let device = AudioDeviceManager.shared.selectedDevice
-                    audioDuckingManager.unduck()
-                    micVolumeManager.restoreMicrophoneVolume()
 
                     // Уведомление об успехе
                     NotificationManager.shared.notifyTranscriptionSuccess(
@@ -513,13 +536,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 LogManager.transcription.failure("Транскрипция", message: "Пустой результат")
                 await MainActor.run {
-                    // Ошибка: убираем иконку обработки, воспроизводим звук ошибки, восстанавливаем музыку и микрофон
+                    // Ошибка: убираем иконку обработки, скрываем окно, воспроизводим звук ошибки
                     menuBarController?.updateProcessingState(false)
-                    floatingWindow?.showError("No speech detected")  // Показываем ошибку
+                    floatingWindow?.hide()  // Скрываем компактное окно
                     SoundManager.shared.play(.transcriptionError)
-                    let device = AudioDeviceManager.shared.selectedDevice
-                    audioDuckingManager.unduck()
-                    micVolumeManager.restoreMicrophoneVolume()
 
                     // Уведомление об ошибке
                     NotificationManager.shared.notifyError(
@@ -532,13 +552,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             LogManager.transcription.failure("Транскрипция", error: error)
             let errorMessage = "Transcription failed: \(error.localizedDescription)"
             await MainActor.run {
-                // Ошибка: убираем иконку обработки, воспроизводим звук ошибки, восстанавливаем музыку и микрофон
+                // Ошибка: убираем иконку обработки, скрываем окно, воспроизводим звук ошибки
                 menuBarController?.updateProcessingState(false)
-                floatingWindow?.showError(errorMessage)  // Показываем ошибку
+                floatingWindow?.hide()  // Скрываем компактное окно
                 SoundManager.shared.play(.transcriptionError)
-                let device = AudioDeviceManager.shared.selectedDevice
-                audioDuckingManager.unduck()
-                micVolumeManager.restoreMicrophoneVolume()
 
                 menuBarController?.showError(errorMessage)
 
@@ -573,6 +590,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         LogManager.app.success("Найдено \(validFiles.count) файлов для транскрипции")
 
+        // Показываем приложение в Dock при открытии окна транскрипции
+        showInDock()
+
         // Создаём новое окно для транскрибации
         let newWindow = FileTranscriptionWindow()
 
@@ -582,6 +602,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Настраиваем обработчик закрытия окна
         newWindow.onClose = { [weak self] window in
             self?.fileTranscriptionWindows.removeAll { $0 === window }
+            // Скрываем из Dock если больше нет окон
+            self?.hideFromDockIfNoWindows()
         }
 
         DispatchQueue.main.async {
@@ -601,11 +623,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Устанавливаем информацию о модели Whisper в окне
+        // Применяем настройки VAD из UserSettings перед транскрипцией
+        service.applyUserSettings()
+
+        // Устанавливаем информацию о модели Whisper и VAD в окне
         if let modelSize = whisperService?.currentModelSize {
             await MainActor.run {
                 window.viewModel.setModel(modelSize)
             }
+        }
+
+        // Устанавливаем информацию о VAD алгоритме
+        let settings = UserSettings.shared
+        let vadInfo: String
+        if settings.fileTranscriptionMode == .batch {
+            vadInfo = "Batch mode"
+        } else {
+            vadInfo = settings.vadAlgorithmType.displayName.replacingOccurrences(of: " (рекомендуется)", with: "")
+        }
+        await MainActor.run {
+            window.viewModel.vadInfo = vadInfo
         }
 
         for (index, fileURL) in files.enumerated() {
@@ -623,23 +660,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // Создаем нормализованную копию файла СНАЧАЛА для улучшения качества
                 let normalizedURL = try AudioFileNormalizer.createNormalizedCopy(of: fileURL)
 
-                // Устанавливаем callback для промежуточных обновлений с нормализованным URL
-                service.onProgressUpdate = { [weak window] fileName, segmentProgress, partialDialogue in
+                // Устанавливаем callback для промежуточных обновлений
+                // ВАЖНО: Используем оригинальное имя файла, чтобы избежать дубликатов
+                service.onProgressUpdate = { [weak window] _, segmentProgress, partialDialogue in
                     guard let dialogue = partialDialogue else { return }
                     Task { @MainActor in
-                        window?.viewModel.updateDialogue(file: fileName, dialogue: dialogue, fileURL: normalizedURL)
+                        window?.viewModel.updateDialogue(file: fileName, dialogue: dialogue, fileURL: fileURL)
                         window?.viewModel.updateProgress(file: fileName, progress: segmentProgress)
                     }
                 }
 
-                // Используем нормализованный файл для транскрипции
+                // Используем нормализованный файл для транскрипции (лучшее качество)
                 let dialogue = try await service.transcribeFileWithDialogue(at: normalizedURL)
 
+                // Убираем периоды тишины (где оба молчат) и пересчитываем временные метки
+                let compressedDialogue = dialogue.removesilencePeriods(minGap: 2.0)
+
                 await MainActor.run {
-                    // Финальное обновление диалога с URL нормализованного файла для плеера
-                    window.viewModel.updateDialogue(file: fileName, dialogue: dialogue, fileURL: normalizedURL)
-                    LogManager.app.success("Файл транскрибирован: \(fileName) (\(dialogue.isStereo ? "стерео диалог" : "моно"))")
+                    // Финальное обновление диалога с ОРИГИНАЛЬНЫМ URL для плеера
+                    window.viewModel.updateDialogue(file: fileName, dialogue: compressedDialogue, fileURL: fileURL)
+                    LogManager.app.success("Файл транскрибирован: \(fileName) (\(compressedDialogue.isStereo ? "стерео диалог" : "моно"), сжато: \(String(format: "%.1f", dialogue.totalDuration))s -> \(String(format: "%.1f", compressedDialogue.totalDuration))s)")
                 }
+
+                // Удаляем временный нормализованный файл после транскрипции
+                try? FileManager.default.removeItem(at: normalizedURL)
+                LogManager.app.debug("Временный нормализованный файл удален")
+
             } catch {
                 LogManager.app.failure("Ошибка транскрипции \(fileName)", error: error)
 

@@ -8,6 +8,9 @@ public class AudioDuckingManager: ObservableObject {
     @Published public var isDucked: Bool = false
     @Published public var duckingEnabled: Bool = true // Можно отключить в настройках
     @Published public var muteOutputCompletely: Bool = true // Полностью выключать звук или приглушать
+    @Published public var pauseMediaEnabled: Bool = true // Автоматическая пауза медиа-плееров
+
+    private let mediaRemote = MediaRemoteManager.shared
 
     private init() {
         print("AudioDuckingManager: Инициализация")
@@ -18,12 +21,16 @@ public class AudioDuckingManager: ObservableObject {
     private func loadSettings() {
         duckingEnabled = UserDefaults.standard.object(forKey: "audioDuckingEnabled") as? Bool ?? true
         muteOutputCompletely = UserDefaults.standard.object(forKey: "muteOutputCompletely") as? Bool ?? true
+        pauseMediaEnabled = UserDefaults.standard.object(forKey: "pauseMediaEnabled") as? Bool ?? true
 
         if UserDefaults.standard.object(forKey: "audioDuckingEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "audioDuckingEnabled")
         }
         if UserDefaults.standard.object(forKey: "muteOutputCompletely") == nil {
             UserDefaults.standard.set(true, forKey: "muteOutputCompletely")
+        }
+        if UserDefaults.standard.object(forKey: "pauseMediaEnabled") == nil {
+            UserDefaults.standard.set(true, forKey: "pauseMediaEnabled")
         }
     }
 
@@ -41,44 +48,65 @@ public class AudioDuckingManager: ObservableObject {
         print("AudioDuckingManager: Mute output \(mute ? "полностью" : "приглушение")")
     }
 
+    /// Сохранение настройки паузы медиа
+    public func savePauseMediaEnabled(_ enabled: Bool) {
+        pauseMediaEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "pauseMediaEnabled")
+        print("AudioDuckingManager: Пауза медиа \(enabled ? "включена" : "выключена")")
+    }
+
     private var originalVolume: Float = 0.5
     private var wasPlaying: Bool = false
 
     /// Приглушить системное аудио (начало записи)
-    public func duck() {
-        guard duckingEnabled, !isDucked else { return }
+    /// - Parameter force: Если true, приглушает независимо от настроек (для Debug кнопок)
+    public func duck(force: Bool = false) {
+        // Приглушение громкости (только если включено или force)
+        if (duckingEnabled && !isDucked) || force {
+            print("AudioDuckingManager: \(muteOutputCompletely ? "Выключение" : "Приглушение") системного аудио\(force ? " (принудительно)" : "")...")
 
-        print("AudioDuckingManager: \(muteOutputCompletely ? "Выключение" : "Приглушение") системного аудио...")
+            // Сохраняем текущую громкость
+            originalVolume = getSystemVolume()
 
-        // Сохраняем текущую громкость
-        originalVolume = getSystemVolume()
+            if muteOutputCompletely || force {
+                // Полностью выключаем звук
+                setSystemVolume(0.0)
+                print("AudioDuckingManager: ✓ Аудио выключено полностью (громкость \(Int(originalVolume * 100))% → 0%)")
+            } else {
+                // Уменьшаем громкость на 50%
+                setSystemVolume(originalVolume * 0.5)
+                print("AudioDuckingManager: ✓ Аудио приглушено (громкость \(Int(originalVolume * 100))% → \(Int(originalVolume * 50))%)")
+            }
 
-        if muteOutputCompletely {
-            // Полностью выключаем звук
-            setSystemVolume(0.0)
-            // ОТКЛЮЧЕНО: pausePlayback() вызывает Ctrl+Cmd+Space который открывает Emoji picker!
-            // pausePlayback()
-            print("AudioDuckingManager: ✓ Аудио выключено полностью (громкость \(Int(originalVolume * 100))% → 0%)")
-        } else {
-            // Уменьшаем громкость на 50%
-            setSystemVolume(originalVolume * 0.5)
-            print("AudioDuckingManager: ✓ Аудио приглушено (громкость \(Int(originalVolume * 100))% → \(Int(originalVolume * 50))%)")
+            isDucked = true
         }
 
-        isDucked = true
+        // Пауза медиа-плееров (независимо от ducking!)
+        if pauseMediaEnabled || force {
+            mediaRemote.pause()
+        }
     }
 
     /// Восстановить системное аудио (конец записи)
-    public func unduck() {
-        guard isDucked else { return }
+    /// - Parameter force: Если true, восстанавливает независимо от флага isDucked (для Debug кнопок)
+    public func unduck(force: Bool = false) {
+        // Восстановление громкости (только если была приглушена)
+        if isDucked || force {
+            print("AudioDuckingManager: Восстановление системного аудио\(force ? " (принудительно)" : "")...")
 
-        print("AudioDuckingManager: Восстановление системного аудио...")
+            // Восстанавливаем исходную громкость
+            if isDucked {
+                setSystemVolume(originalVolume)
+                print("AudioDuckingManager: ✓ Громкость восстановлена до \(Int(originalVolume * 100))%")
+            }
 
-        // Восстанавливаем исходную громкость
-        setSystemVolume(originalVolume)
+            isDucked = false
+        }
 
-        isDucked = false
-        print("AudioDuckingManager: ✓ Аудио восстановлено (громкость восстановлена до \(Int(originalVolume * 100))%)")
+        // Возобновление медиа-плееров (независимо от ducking!)
+        if pauseMediaEnabled || force {
+            mediaRemote.resume(force: force)
+        }
     }
 
     /// Получить текущую системную громкость (0.0 - 1.0)
@@ -118,24 +146,4 @@ public class AudioDuckingManager: ObservableObject {
         return nil
     }
 
-    /// Приостановить воспроизведение музыки
-    private func pausePlayback() {
-        // Используем медиакей для остановки воспроизведения
-        let script = """
-        tell application "System Events"
-            try
-                keystroke " " using {control down, command down}
-            end try
-        end tell
-        """
-        _ = runAppleScript(script)
-        print("AudioDuckingManager: Media playback paused")
-    }
-
-    /// Возобновить воспроизведение музыки (если было активно)
-    private func resumePlayback() {
-        // Пока не реализовано автоматическое возобновление,
-        // так как не можем точно знать, было ли что-то активно
-        // Пользователь может возобновить вручную
-    }
 }
