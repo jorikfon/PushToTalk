@@ -59,6 +59,16 @@ else
     echo -e "${YELLOW}⚠️  No app icon found (Resources/AppIcon.icns), using default${NC}"
 fi
 
+# Copy localization files
+if [ -d "Resources/Localization" ]; then
+    cp -R "Resources/Localization/"*.lproj "${RESOURCES_DIR}/" 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✅ Localization files copied${NC}"
+    else
+        echo -e "${YELLOW}⚠️  No localization files found${NC}"
+    fi
+fi
+
 # Create PkgInfo file
 echo -e "${YELLOW}[4/6] Creating PkgInfo...${NC}"
 echo -n "APPL????" > "${CONTENTS_DIR}/PkgInfo"

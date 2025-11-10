@@ -23,6 +23,9 @@ let package = Package(
             exclude: [
                 "App/PushToTalkApp.swift",
                 "App/AppDelegate.swift"
+            ],
+            resources: [
+                .process("../Resources/Localization")
             ]
         ),
 
@@ -35,6 +38,15 @@ let package = Package(
             ],
             path: "Sources/App",
             sources: ["PushToTalkApp.swift", "AppDelegate.swift"]
+        ),
+
+        // Unit Tests
+        .testTarget(
+            name: "PushToTalkTests",
+            dependencies: [
+                "PushToTalkCore"
+            ],
+            path: "Tests/PushToTalkTests"
         )
     ]
 )
