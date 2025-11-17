@@ -78,6 +78,10 @@ The application is built with **Swift** and uses **WhisperKit** for on-device sp
   - `stopRecording()` - Ends recording and performs transcription
   - `handleAudioChunk()` - Real-time chunk processing
   - `performTranscription()` - Main transcription workflow
+- **Audio Environment Lifecycle**:
+  - `prepareAudioEnvironment()` - Called at recording start (ducks system audio, boosts microphone)
+  - `restoreAudioEnvironment()` - Called AFTER transcription completes (unducks audio, restores mic volume)
+  - CRITICAL: Audio restoration must happen after transcription to prevent music bleeding into audio buffer
 
 #### 3. SettingsCoordinator (`Sources/Coordinators/SettingsCoordinator.swift`)
 - **Responsibility**: Settings window management
