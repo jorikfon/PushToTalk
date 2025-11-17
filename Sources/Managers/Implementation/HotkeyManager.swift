@@ -27,7 +27,10 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
 
     // MARK: - Private Properties
 
-    private let storageKey = "pushToTalkHotkey"
+    private let storageKey = "pushToTalkHotkey"  // Legacy key (for backwards compatibility)
+    private let presetStorageKey = "pushToTalkPresetHotkey"
+    private let customStorageKey = "pushToTalkCustomHotkey"
+    private let modeStorageKey = "pushToTalkHotkeyMode"
 
     // MARK: - Computed Properties (Protocol)
 
@@ -39,14 +42,27 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
 
     public init() {
         // F16 по умолчанию (инициализация перед loadHotkey)
-        currentHotkey = Hotkey(name: "F16", keyCode: 106, displayName: "F16", modifiers: [])
+        currentHotkey = Hotkey(name: "F16", keyCode: 106, displayName: "F16", modifiers: [], source: .preset)
 
-        // Загружаем сохранённую горячую клавишу или используем F16 по умолчанию
-        if let saved = loadHotkey() {
-            currentHotkey = saved
+        // Миграция: проверяем legacy storage key
+        if let legacyHotkey = loadLegacyHotkey() {
+            LogManager.keyboard.info("Мигрируем legacy hotkey в новое хранилище")
+            // Сохраняем в preset storage
+            saveHotkeyToStorage(legacyHotkey, key: presetStorageKey)
+            // Удаляем legacy key
+            UserDefaults.standard.removeObject(forKey: storageKey)
+            currentHotkey = legacyHotkey
+        } else {
+            // Загружаем текущий режим
+            let currentMode = loadCurrentMode()
+
+            // Загружаем сохранённую горячую клавишу для текущего режима
+            if let saved = loadHotkey(for: currentMode) {
+                currentHotkey = saved
+            }
         }
 
-        LogManager.keyboard.info("HotkeyManager инициализирован с клавишей \(self.currentHotkey.displayName)")
+        LogManager.keyboard.info("HotkeyManager инициализирован с клавишей \(self.currentHotkey.displayName) (режим: \(self.currentHotkey.source))")
     }
 
     // MARK: - Protocol Methods
@@ -61,17 +77,49 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
 
         currentHotkey = hotkey
 
-        do {
-            let encoder = JSONEncoder()
-            let data = try encoder.encode(hotkey)
-            UserDefaults.standard.set(data, forKey: storageKey)
-            LogManager.keyboard.success("Горячая клавиша сохранена", details: hotkey.displayName)
+        // Сохраняем в соответствующее хранилище в зависимости от source
+        let storageKey = hotkey.source == .preset ? presetStorageKey : customStorageKey
+        saveHotkeyToStorage(hotkey, key: storageKey)
 
-            // Уведомляем об изменении (для обновления KeyboardMonitor)
-            NotificationCenter.default.post(name: .hotkeyDidChange, object: hotkey)
-        } catch {
-            LogManager.keyboard.failure("Сохранение горячей клавиши", error: error)
+        // Сохраняем текущий режим
+        UserDefaults.standard.set(hotkey.source.rawValue, forKey: modeStorageKey)
+
+        LogManager.keyboard.success("Горячая клавиша сохранена", details: "\(hotkey.displayName) (режим: \(hotkey.source))")
+
+        // Уведомляем об изменении (для обновления KeyboardMonitor)
+        NotificationCenter.default.post(name: .hotkeyDidChange, object: hotkey)
+    }
+
+    /// Сохранение preset горячей клавиши
+    public func savePresetHotkey(_ hotkey: Hotkey) {
+        var presetHotkey = hotkey
+        // Убедимся что source установлен в .preset
+        if hotkey.source != .preset {
+            presetHotkey = Hotkey(
+                name: hotkey.name,
+                keyCode: hotkey.keyCode,
+                displayName: hotkey.displayName,
+                modifiers: hotkey.modifiers,
+                source: .preset
+            )
         }
+        saveHotkey(presetHotkey)
+    }
+
+    /// Сохранение custom горячей клавиши
+    public func saveCustomHotkey(_ hotkey: Hotkey) {
+        var customHotkey = hotkey
+        // Убедимся что source установлен в .custom
+        if hotkey.source != .custom {
+            customHotkey = Hotkey(
+                name: hotkey.name,
+                keyCode: hotkey.keyCode,
+                displayName: hotkey.displayName,
+                modifiers: hotkey.modifiers,
+                source: .custom
+            )
+        }
+        saveHotkey(customHotkey)
     }
 
     /// Проверка валидности hotkey (чтобы не использовать системные комбинации)
@@ -99,8 +147,23 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
 
     // MARK: - Private Methods
 
-    /// Загрузка сохранённой горячей клавиши
-    private func loadHotkey() -> Hotkey? {
+    /// Загрузка сохранённой горячей клавиши для указанного режима
+    public func loadHotkey(for source: HotkeySource) -> Hotkey? {
+        let storageKey = source == .preset ? presetStorageKey : customStorageKey
+        return loadHotkeyFromStorage(key: storageKey)
+    }
+
+    /// Загрузка текущего режима из UserDefaults
+    private func loadCurrentMode() -> HotkeySource {
+        guard let modeString = UserDefaults.standard.string(forKey: modeStorageKey),
+              let mode = HotkeySource(rawValue: modeString) else {
+            return .preset  // По умолчанию preset режим
+        }
+        return mode
+    }
+
+    /// Загрузка legacy hotkey (для миграции)
+    private func loadLegacyHotkey() -> Hotkey? {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else {
             return nil
         }
@@ -111,21 +174,65 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
 
             // Проверяем валидность загруженной клавиши
             guard isValidHotkey(hotkey) else {
-                LogManager.keyboard.error("Загруженная клавиша невалидна: \(hotkey.displayName)")
-                LogManager.keyboard.info("Сброс на клавишу по умолчанию: F16")
-
-                // Удаляем недопустимую настройку
+                LogManager.keyboard.error("Legacy клавиша невалидна: \(hotkey.displayName)")
                 UserDefaults.standard.removeObject(forKey: storageKey)
                 return nil
             }
 
-            LogManager.keyboard.success("Горячая клавиша загружена", details: hotkey.displayName)
+            LogManager.keyboard.success("Legacy клавиша загружена для миграции", details: hotkey.displayName)
             return hotkey
         } catch {
-            LogManager.keyboard.failure("Загрузка горячей клавиши", error: error)
+            LogManager.keyboard.failure("Загрузка legacy клавиши", error: error)
             return nil
         }
     }
+
+    /// Общий метод загрузки горячей клавиши из указанного storage key
+    private func loadHotkeyFromStorage(key: String) -> Hotkey? {
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            return nil
+        }
+
+        do {
+            let decoder = JSONDecoder()
+            let hotkey = try decoder.decode(Hotkey.self, from: data)
+
+            // Проверяем валидность загруженной клавиши
+            guard isValidHotkey(hotkey) else {
+                LogManager.keyboard.error("Загруженная клавиша невалидна: \(hotkey.displayName)")
+                LogManager.keyboard.info("Удаляем невалидную настройку из \(key)")
+
+                // Удаляем недопустимую настройку
+                UserDefaults.standard.removeObject(forKey: key)
+                return nil
+            }
+
+            LogManager.keyboard.success("Горячая клавиша загружена", details: "\(hotkey.displayName) из \(key)")
+            return hotkey
+        } catch {
+            LogManager.keyboard.failure("Загрузка горячей клавиши из \(key)", error: error)
+            return nil
+        }
+    }
+
+    /// Общий метод сохранения горячей клавиши в указанный storage key
+    private func saveHotkeyToStorage(_ hotkey: Hotkey, key: String) {
+        do {
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(hotkey)
+            UserDefaults.standard.set(data, forKey: key)
+        } catch {
+            LogManager.keyboard.failure("Сохранение горячей клавиши в \(key)", error: error)
+        }
+    }
+}
+
+// MARK: - HotkeySource
+
+/// Источник горячей клавиши (определяет какой API использовать для мониторинга)
+public enum HotkeySource: String, Codable {
+    case preset    // F13-F19 через Carbon API (не требует Accessibility)
+    case custom    // Произвольная комбинация через CGEventTap (требует Accessibility)
 }
 
 // MARK: - Hotkey
@@ -137,18 +244,20 @@ public struct Hotkey: Identifiable, Codable, Equatable {
     public let keyCode: CGKeyCode
     public let displayName: String
     public let modifiers: CGEventFlags
+    public let source: HotkeySource
 
-    public init(name: String, keyCode: CGKeyCode, displayName: String, modifiers: CGEventFlags = []) {
+    public init(name: String, keyCode: CGKeyCode, displayName: String, modifiers: CGEventFlags = [], source: HotkeySource = .preset) {
         self.name = name
         self.keyCode = keyCode
         self.displayName = displayName
         self.modifiers = modifiers
+        self.source = source
     }
 
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case name, keyCode, displayName, modifiers
+        case name, keyCode, displayName, modifiers, source
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -157,6 +266,7 @@ public struct Hotkey: Identifiable, Codable, Equatable {
         try container.encode(keyCode, forKey: .keyCode)
         try container.encode(displayName, forKey: .displayName)
         try container.encode(modifiers.rawValue, forKey: .modifiers)
+        try container.encode(source, forKey: .source)
     }
 
     public init(from decoder: Decoder) throws {
@@ -166,12 +276,14 @@ public struct Hotkey: Identifiable, Codable, Equatable {
         displayName = try container.decode(String.self, forKey: .displayName)
         let modifiersRaw = try container.decodeIfPresent(UInt64.self, forKey: .modifiers) ?? 0
         modifiers = CGEventFlags(rawValue: modifiersRaw)
+        // Backwards compatibility: default to .preset for old saved hotkeys
+        source = try container.decodeIfPresent(HotkeySource.self, forKey: .source) ?? .preset
     }
 
     // MARK: - Equatable
 
     public static func == (lhs: Hotkey, rhs: Hotkey) -> Bool {
-        return lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers
+        return lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers && lhs.source == rhs.source
     }
 }
 
