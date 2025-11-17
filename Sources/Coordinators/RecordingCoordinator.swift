@@ -144,14 +144,18 @@ public final class RecordingCoordinator {
         // Обновление UI и воспроизведение звуков
         updateUIForRecordingState(recording: false)
 
-        // Восстановление аудио окружения
-        restoreAudioEnvironment()
-
         // Показ состояния обработки
         showProcessingState()
 
         // Асинхронная транскрипция
         Task {
+            // Гарантированное восстановление аудио окружения даже при ошибках
+            defer {
+                Task { @MainActor in
+                    restoreAudioEnvironment()
+                }
+            }
+
             await performTranscription(audioData: audioData)
         }
     }
@@ -240,7 +244,9 @@ public final class RecordingCoordinator {
         micVolumeManager.boostMicrophoneVolume()
     }
 
-    /// Восстановление аудио окружения после записи
+    /// Восстановление аудио окружения после транскрипции
+    /// ВАЖНО: Вызывается ПОСЛЕ завершения транскрипции, а не сразу после остановки записи,
+    /// чтобы предотвратить попадание кусочков музыки в конец аудио буфера
     private func restoreAudioEnvironment() {
         audioDuckingManager.unduck()
         micVolumeManager.restoreMicrophoneVolume()

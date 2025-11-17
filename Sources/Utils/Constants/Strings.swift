@@ -90,6 +90,12 @@ public enum Strings {
         public static let functionKeys = NSLocalizedString("hotkeys.functionKeys", bundle: bundle, comment: "Function keys label")
         public static let modifiers = NSLocalizedString("hotkeys.modifiers", bundle: bundle, comment: "Modifiers label")
         public static let noModifier = NSLocalizedString("hotkeys.noModifier", bundle: bundle, comment: "No modifier option")
+
+        // Hybrid hotkey mode
+        public static let presetMode = NSLocalizedString("hotkeys.presetMode", bundle: bundle, comment: "Preset F-Keys mode label")
+        public static let customMode = NSLocalizedString("hotkeys.customMode", bundle: bundle, comment: "Custom Hotkey mode label")
+        public static let modeSelection = NSLocalizedString("hotkeys.modeSelection", bundle: bundle, comment: "Hotkey Mode selection label")
+        public static let accessibilityRequired = NSLocalizedString("hotkeys.accessibilityRequired", bundle: bundle, comment: "Accessibility permission required message")
     }
 
     // MARK: - Vocabulary Settings
