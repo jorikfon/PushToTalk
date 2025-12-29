@@ -2,24 +2,9 @@ import Cocoa
 import Carbon
 import Combine
 
-/// Контекст для CGEventTap callback (custom hotkey mode)
-class HotkeyTapContext {
-    let keyCode: CGKeyCode
-    let modifiers: CGEventFlags
-    var continuation: AsyncStream<HotkeyEvent>.Continuation?
-    var isPressed: Bool = false
-
-    init(keyCode: CGKeyCode, modifiers: CGEventFlags, continuation: AsyncStream<HotkeyEvent>.Continuation?) {
-        self.keyCode = keyCode
-        self.modifiers = modifiers
-        self.continuation = continuation
-    }
-}
-
-/// Глобальный мониторинг горячих клавиш
-/// Поддерживает два режима:
-/// 1. Preset (Carbon API) - F13-F19, НЕ требует Accessibility разрешения
-/// 2. Custom (CGEventTap) - любые комбинации клавиш, требует Accessibility разрешения
+/// Глобальный мониторинг горячих клавиш через Carbon API (RegisterEventHotKey)
+/// НЕ требует Accessibility разрешения для F13-F19
+/// Автоматически блокирует системный Emoji picker для F16
 public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
     @Published public var isHotkeyPressed = false
 
@@ -47,9 +32,6 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
 
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
-    private var eventTap: CFMachPort?
-    private var customEventTap: CFMachPort?  // Для custom hotkey режима
-    private var tapContext: HotkeyTapContext?  // Контекст для custom tap callback
     private var isMonitoring = false
     private var cancellables = Set<AnyCancellable>()
 
@@ -84,20 +66,10 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
         }
 
         let hotkey = HotkeyManager.shared.currentHotkey
-        LogManager.keyboard.begin("Запуск мониторинга", details: "клавиша \(hotkey.displayName) (режим: \(hotkey.source))")
+        LogManager.keyboard.begin("Запуск мониторинга", details: "клавиша \(hotkey.displayName) (keyCode: \(hotkey.keyCode))")
 
-        // Выбираем режим мониторинга в зависимости от source
-        switch hotkey.source {
-        case .preset:
-            return startPresetMonitoring(hotkey: hotkey)
-        case .custom:
-            return startCustomMonitoring(hotkey: hotkey)
-        }
-    }
-
-    /// Запуск мониторинга в preset режиме (Carbon API для F13-F19)
-    private func startPresetMonitoring(hotkey: Hotkey) -> Bool {
-        LogManager.keyboard.info("Preset режим: Carbon API (не требует Accessibility для F-клавиш)")
+        // Carbon API НЕ требует Accessibility для F13-F19
+        LogManager.keyboard.info("Carbon API не требует Accessibility разрешения для F-клавиш")
 
         // Регистрируем Carbon Event Handler для нажатия И отпускания
         var eventTypes = [
@@ -142,183 +114,11 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
             return false
         }
 
-        // Создаём Event Tap для полной блокировки клавиши (требует Accessibility)
-        setupEventTap(for: hotkey.keyCode)
-
         isMonitoring = true
-        LogManager.keyboard.success("Preset мониторинг запущен", details: "Carbon API с эксклюзивным захватом для \(hotkey.displayName)")
+        LogManager.keyboard.success("Мониторинг запущен", details: "Carbon API для \(hotkey.displayName)")
 
         return true
     }
-
-    /// Запуск мониторинга в custom режиме (CGEventTap для любых комбинаций)
-    private func startCustomMonitoring(hotkey: Hotkey) -> Bool {
-        // Проверяем Accessibility разрешение (ОБЯЗАТЕЛЬНО для custom режима)
-        let trusted = AXIsProcessTrusted()
-        if !trusted {
-            LogManager.keyboard.error("❌ Custom режим требует Accessibility разрешение")
-            LogManager.keyboard.info("💡 Добавьте PushToTalk в System Settings → Privacy & Security → Accessibility")
-            return false
-        }
-
-        LogManager.keyboard.info("Custom режим: CGEventTap (Accessibility разрешение предоставлено)")
-
-        let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
-
-        // Создаём контекст для передачи в callback
-        tapContext = HotkeyTapContext(
-            keyCode: hotkey.keyCode,
-            modifiers: hotkey.modifiers,
-            continuation: eventContinuation
-        )
-
-        // Получаем unsafe pointer на контекст
-        let contextPtr = Unmanaged.passUnretained(tapContext!).toOpaque()
-
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(eventMask),
-            callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-                return KeyboardMonitor.handleCustomEventTap(proxy: proxy, type: type, event: event, refcon: refcon)
-            },
-            userInfo: contextPtr
-        ) else {
-            LogManager.keyboard.error("❌ Не удалось создать CGEventTap для custom hotkey")
-            tapContext = nil
-            return false
-        }
-
-        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-
-        customEventTap = tap
-        isMonitoring = true
-        LogManager.keyboard.success("Custom мониторинг запущен", details: "CGEventTap для \(hotkey.displayName)")
-
-        return true
-    }
-
-    /// Callback для CGEventTap (custom hotkey режим)
-    private static func handleCustomEventTap(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
-        // Получаем контекст
-        guard let refcon = refcon else {
-            return Unmanaged.passRetained(event)
-        }
-
-        let context = Unmanaged<HotkeyTapContext>.fromOpaque(refcon).takeUnretainedValue()
-
-        let eventKeyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
-        let eventModifiers = event.flags
-
-        // Проверяем совпадение keyCode
-        guard eventKeyCode == context.keyCode else {
-            return Unmanaged.passRetained(event)
-        }
-
-        // Проверяем совпадение модификаторов (если они есть)
-        if !context.modifiers.isEmpty {
-            // Маска для проверки только нужных модификаторов
-            let relevantFlags: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
-            let eventRelevantModifiers = eventModifiers.intersection(relevantFlags)
-            let requiredModifiers = context.modifiers.intersection(relevantFlags)
-
-            guard eventRelevantModifiers == requiredModifiers else {
-                return Unmanaged.passRetained(event)
-            }
-        }
-
-        // Это наша горячая клавиша! Обрабатываем нажатие/отпускание
-        if type == .keyDown && !context.isPressed {
-            context.isPressed = true
-            LogManager.keyboard.info("Custom горячая клавиша нажата")
-
-            // Отправляем событие в AsyncStream
-            context.continuation?.yield(.pressed)
-
-            // Вызываем deprecated callback
-            DispatchQueue.main.async {
-                KeyboardMonitor.shared?.onHotkeyPress?()
-                KeyboardMonitor.shared?.isHotkeyPressed = true
-            }
-
-            // Блокируем событие
-            return nil
-        } else if type == .keyUp && context.isPressed {
-            context.isPressed = false
-            LogManager.keyboard.info("Custom горячая клавиша отпущена")
-
-            // Отправляем событие в AsyncStream
-            context.continuation?.yield(.released)
-
-            // Вызываем deprecated callback
-            DispatchQueue.main.async {
-                KeyboardMonitor.shared?.onHotkeyRelease?()
-                KeyboardMonitor.shared?.isHotkeyPressed = false
-            }
-
-            // Блокируем событие
-            return nil
-        }
-
-        // Пропускаем событие
-        return Unmanaged.passRetained(event)
-    }
-
-    /// Создаёт CGEventTap для полной блокировки клавиши (требует Accessibility)
-    private func setupEventTap(for keyCode: UInt16) {
-        // Проверяем Accessibility разрешение
-        let trusted = AXIsProcessTrusted()
-        if !trusted {
-            LogManager.keyboard.warning("⚠️ Accessibility не предоставлено - клавиша может вызывать системные действия (Emoji picker)")
-            LogManager.keyboard.info("💡 Добавьте PushToTalk в System Settings → Privacy & Security → Accessibility")
-            return
-        }
-
-        let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
-
-        // Создаём указатель для передачи keyCode в callback
-        let keyCodePtr = UnsafeMutablePointer<UInt16>.allocate(capacity: 1)
-        keyCodePtr.pointee = keyCode
-
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(eventMask),
-            callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-                let eventKeyCode = event.getIntegerValueField(.keyboardEventKeycode)
-
-                // Получаем сохранённый keyCode
-                guard let keyCodePtr = refcon?.assumingMemoryBound(to: UInt16.self) else {
-                    return Unmanaged.passRetained(event)
-                }
-                let targetKeyCode = Int64(keyCodePtr.pointee)
-
-                // Блокируем нашу клавишу
-                if eventKeyCode == targetKeyCode {
-                    return nil  // Полностью съедаем событие
-                }
-
-                return Unmanaged.passRetained(event)
-            },
-            userInfo: UnsafeMutableRawPointer(keyCodePtr)
-        ) else {
-            keyCodePtr.deallocate()
-            LogManager.keyboard.error("❌ Не удалось создать Event Tap")
-            return
-        }
-
-        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-
-        self.eventTap = tap
-        LogManager.keyboard.success("✅ Event Tap активирован - клавиша полностью блокирована от системы")
-    }
-
 
     /// Остановить мониторинг клавиатуры
     public func stopMonitoring() {
@@ -326,34 +126,17 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
 
         LogManager.keyboard.begin("Остановка мониторинга")
 
-        // Отменяем регистрацию горячей клавиши (preset режим)
+        // Отменяем регистрацию горячей клавиши
         if let hotKeyRef = hotKeyRef {
             UnregisterEventHotKey(hotKeyRef)
             self.hotKeyRef = nil
         }
 
-        // Удаляем event handler (preset режим)
+        // Удаляем event handler
         if let eventHandler = eventHandler {
             RemoveEventHandler(eventHandler)
             self.eventHandler = nil
         }
-
-        // Отключаем Event Tap для блокировки (preset режим)
-        if let eventTap = eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            CFMachPortInvalidate(eventTap)
-            self.eventTap = nil
-        }
-
-        // Отключаем Custom Event Tap (custom режим)
-        if let customEventTap = customEventTap {
-            CGEvent.tapEnable(tap: customEventTap, enable: false)
-            CFMachPortInvalidate(customEventTap)
-            self.customEventTap = nil
-        }
-
-        // Очищаем контекст custom tap
-        tapContext = nil
 
         isMonitoring = false
         LogManager.keyboard.success("Мониторинг остановлен")

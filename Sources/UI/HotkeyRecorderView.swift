@@ -160,13 +160,12 @@ public struct HotkeyRecorderView: View {
             return
         }
 
-        // Создаём hotkey с source = .custom
+        // Создаём hotkey
         let newHotkey = Hotkey(
             name: displayName,
             keyCode: keyCode,
             displayName: displayName,
-            modifiers: modifiers,
-            source: .custom
+            modifiers: modifiers
         )
 
         // Сохраняем
@@ -218,7 +217,7 @@ public struct HotkeyRecorderView: View {
 
 /// Preview provider
 struct HotkeyRecorderView_Previews: PreviewProvider {
-    @State static var testHotkey: Hotkey? = Hotkey(name: "F16", keyCode: 106, displayName: "F16", modifiers: [], source: .custom)
+    @State static var testHotkey: Hotkey? = Hotkey(name: "F16", keyCode: 106, displayName: "F16", modifiers: [])
 
     static var previews: some View {
         VStack {
