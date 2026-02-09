@@ -135,6 +135,14 @@ public enum AppConstants {
         public static let logProbThreshold = "logProbThreshold"
     }
 
+    // MARK: - Storage
+
+    /// Директория для хранения моделей WhisperKit (Application Support, не синхронизируется с iCloud)
+    public static let modelStorageDirectory: URL = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("PushToTalk/Models", isDirectory: true)
+    }()
+
     // MARK: - Performance
 
     /// Таймаут для загрузки модели (секунды)

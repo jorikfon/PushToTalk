@@ -38,18 +38,28 @@ public class MediaRemoteManager {
     }
 
     /// Отправляет команду паузы медиа-плееру
+    /// Проверяет, воспроизводится ли что-то — если нет, не ставит на паузу
     public func pause() {
-        LogManager.app.info("MediaRemoteManager: Отправка команды паузы...")
+        LogManager.app.info("MediaRemoteManager: Проверяем состояние воспроизведения перед паузой...")
 
-        // Отправляем команду паузы
-        let success = MRMediaRemoteSendCommand(MRMediaRemoteCommandPause, nil)
+        isPlaying { [weak self] playing in
+            guard let self = self else { return }
 
-        if success {
-            didPause = true
-            LogManager.app.success("MediaRemoteManager: ✓ Команда паузы отправлена")
-        } else {
-            didPause = false
-            LogManager.app.warning("MediaRemoteManager: Не удалось отправить команду паузы")
+            guard playing else {
+                self.didPause = false
+                LogManager.app.debug("MediaRemoteManager: Ничего не воспроизводится, пауза не нужна")
+                return
+            }
+
+            let success = MRMediaRemoteSendCommand(MRMediaRemoteCommandPause, nil)
+
+            if success {
+                self.didPause = true
+                LogManager.app.success("MediaRemoteManager: ✓ Команда паузы отправлена")
+            } else {
+                self.didPause = false
+                LogManager.app.warning("MediaRemoteManager: Не удалось отправить команду паузы")
+            }
         }
     }
 
