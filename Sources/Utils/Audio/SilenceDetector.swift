@@ -7,7 +7,7 @@ public class SilenceDetector {
     public static let shared = SilenceDetector()
 
     // Пороговые значения
-    private let rmsThreshold: Float = 0.01  // Минимальный RMS для "не тишины"
+    private let rmsThreshold: Float = 0.002  // Минимальный RMS для "не тишины"
     private let minSpeechDuration: Float = 0.3  // Минимальная длительность речи (секунды)
 
     private init() {
