@@ -50,9 +50,8 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
     // MARK: - Initialization
 
     public init() {
-        // Получаем директорию для хранения моделей
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        modelDirectory = cacheDir.appendingPathComponent("whisperkit_models", isDirectory: true)
+        // Директория для хранения моделей (Application Support, не синхронизируется с iCloud)
+        modelDirectory = AppConstants.modelStorageDirectory
 
         // Создаём директорию если не существует
         try? FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
@@ -109,6 +108,7 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
         do {
             let _ = try await WhisperKit(
                 model: modelName,
+                downloadBase: modelDirectory,
                 verbose: false,
                 logLevel: .none,
                 prewarm: false
@@ -145,6 +145,7 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
             print("ModelManager: Инициализация WhisperKit для загрузки \(modelName)...")
             let _ = try await WhisperKit(
                 model: modelName,
+                downloadBase: modelDirectory,
                 verbose: true,
                 logLevel: .info
             )
@@ -186,13 +187,12 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
             saveCurrentModel("small")
         }
 
-        // Пытаемся найти и удалить файлы на диске
-        let hubCacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("huggingface/models", isDirectory: true)
+        // Пытаемся найти и удалить файлы на диске (в modelDirectory через HubApi структуру)
+        let hubModelsDir = modelDirectory.appendingPathComponent("models", isDirectory: true)
 
         let possiblePaths = [
-            hubCacheDir.appendingPathComponent("openai_whisper-\(modelName)", isDirectory: true),
-            hubCacheDir.appendingPathComponent("whisper-\(modelName)", isDirectory: true),
+            hubModelsDir.appendingPathComponent("argmaxinc/whisperkit-coreml/openai_whisper-\(modelName)", isDirectory: true),
+            hubModelsDir.appendingPathComponent("openai_whisper-\(modelName)", isDirectory: true),
             modelDirectory.appendingPathComponent(modelName, isDirectory: true)
         ]
 

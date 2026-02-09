@@ -4,7 +4,7 @@ import Combine
 
 /// Глобальный мониторинг горячих клавиш через Carbon API (RegisterEventHotKey)
 /// НЕ требует Accessibility разрешения для F13-F19
-/// Автоматически блокирует системный Emoji picker для F16
+/// Блокирует media key events (Play/Pause) для F16 через CGEventTap
 public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
     @Published public var isHotkeyPressed = false
 
@@ -115,6 +115,7 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
         }
 
         isMonitoring = true
+
         LogManager.keyboard.success("Мониторинг запущен", details: "Carbon API для \(hotkey.displayName)")
 
         return true
@@ -152,21 +153,9 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
     // MARK: - Carbon Event Handler
 
     private static func handleCarbonEvent(nextHandler: EventHandlerCallRef?, event: EventRef?, userData: UnsafeMutableRawPointer?) -> OSStatus {
-        guard let monitor = KeyboardMonitor.shared else {
+        guard let monitor = KeyboardMonitor.shared, let event = event else {
             return OSStatus(eventNotHandledErr)
         }
-
-        // Определяем тип события (нажатие или отпускание)
-        var eventKind: UInt32 = 0
-        GetEventParameter(
-            event,
-            UInt32(kEventParamKeyboardType),
-            UInt32(typeUInt32),
-            nil,
-            MemoryLayout<UInt32>.size,
-            nil,
-            &eventKind
-        )
 
         var hotKeyID = EventHotKeyID()
         let status = GetEventParameter(
@@ -187,12 +176,10 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
         if hotKeyID.signature == OSType(0x50545400) && hotKeyID.id == 1 {
             let hotkey = HotkeyManager.shared.currentHotkey
 
-            // Carbon Event имеет структуру: eventClass + eventKind
-            // Мы зарегистрировали 2 типа событий: kEventHotKeyPressed и kEventHotKeyReleased
-            // Проверим текущее состояние isHotkeyPressed чтобы понять это Press или Release
+            // Определяем тип события через GetEventKind (pressed vs released)
+            let eventKind = GetEventKind(event)
 
-            if !monitor.isHotkeyPressed {
-                // Это событие нажатия (потому что кнопка еще не нажата)
+            if eventKind == UInt32(kEventHotKeyPressed) {
                 monitor.isHotkeyPressed = true
                 LogManager.keyboard.info("Горячая клавиша нажата: \(hotkey.displayName)")
 
@@ -203,8 +190,7 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
                 DispatchQueue.main.async {
                     monitor.onHotkeyPress?()
                 }
-            } else {
-                // Это событие отпускания (потому что кнопка уже нажата)
+            } else if eventKind == UInt32(kEventHotKeyReleased) {
                 monitor.isHotkeyPressed = false
                 LogManager.keyboard.info("Горячая клавиша отпущена: \(hotkey.displayName)")
 
@@ -217,8 +203,7 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
                 }
             }
 
-            // ВАЖНО: CallNextEventHandler НЕ вызываем, чтобы съесть событие полностью
-            // Возвращаем noErr = событие обработано И не передается дальше по цепочке
+            // ВАЖНО: Возвращаем noErr чтобы съесть событие полностью
             return noErr
         }
 

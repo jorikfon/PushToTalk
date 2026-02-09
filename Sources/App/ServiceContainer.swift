@@ -25,6 +25,7 @@ public final class ServiceContainer {
     /// Сервис транскрипции через WhisperKit
     public lazy var whisperService: WhisperServiceProtocol = {
         WhisperService(
+            downloadBase: AppConstants.modelStorageDirectory,
             vocabularyManager: self.vocabularyManager,
             userSettings: self.userSettings
         )

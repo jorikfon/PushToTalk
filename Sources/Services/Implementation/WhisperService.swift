@@ -7,6 +7,7 @@ import Metal
 public class WhisperService: WhisperServiceProtocol {
     private var whisperKit: WhisperKit?
     private var modelSize: String  // Изменено с let на var для возможности смены модели
+    private let downloadBase: URL
     private let vocabularyManager: VocabularyManagerProtocol
     private let userSettings: UserSettings
     private let audioNormalizer = AudioNormalizer(parameters: .default)
@@ -30,10 +31,12 @@ public class WhisperService: WhisperServiceProtocol {
 
     public init(
         modelSize: String = "small",
+        downloadBase: URL = AppConstants.modelStorageDirectory,
         vocabularyManager: VocabularyManagerProtocol,
         userSettings: UserSettings
     ) {
         self.modelSize = modelSize
+        self.downloadBase = downloadBase
         self.vocabularyManager = vocabularyManager
         self.userSettings = userSettings
         LogManager.transcription.info("Инициализация WhisperService с моделью \(modelSize)")
@@ -82,6 +85,7 @@ public class WhisperService: WhisperServiceProtocol {
             // Модель будет загружена автоматически с Hugging Face
             whisperKit = try await WhisperKit(
                 model: modelSize,
+                downloadBase: downloadBase,
                 computeOptions: computeOptions,
                 verbose: true,
                 logLevel: .debug,
