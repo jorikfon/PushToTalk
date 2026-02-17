@@ -1,7 +1,7 @@
 ---
 name: m-refactor-hotkey-key-constraints
 branch: feature/m-refactor-hotkey-key-constraints
-status: pending
+status: in-progress
 created: 2026-02-17
 ---
 

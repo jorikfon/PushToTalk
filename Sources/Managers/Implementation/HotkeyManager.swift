@@ -32,6 +32,12 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
     /// Опасные системные комбинации
     private static let dangerousKeyCodes: Set<UInt16> = [12, 13, 48] // Q, W, Tab
 
+    /// Коды F-клавиш (F1-F19), разрешённых без модификаторов
+    private static let functionKeyCodes: Set<CGKeyCode> = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, // F1-F12
+        105, 107, 113, 106, 64, 79, 80                           // F13-F19
+    ]
+
     // MARK: - Computed Properties (Protocol)
 
     public var currentKeyCode: CGKeyCode {
@@ -89,6 +95,16 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
         // Запрещаем modifier-only клавиши
         let modifierOnlyKeys: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62]
         if modifierOnlyKeys.contains(hotkey.keyCode) {
+            return false
+        }
+
+        // F-клавиши разрешены без модификаторов
+        if HotkeyManager.functionKeyCodes.contains(hotkey.keyCode) { return true }
+
+        // Regular keys (буквы, цифры, символы) — ОБЯЗАТЕЛЕН модификатор ⌘/⌥/⌃
+        // Только ⇧ не считается — Shift+A это просто заглавная буква
+        let meaningfulModifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl]
+        guard !hotkey.modifiers.intersection(meaningfulModifiers).isEmpty else {
             return false
         }
 
@@ -181,30 +197,17 @@ public struct Hotkey: Identifiable, Codable, Equatable {
     public let displayName: String
     public let modifiers: CGEventFlags
 
-    /// Порог длительности нажатия для hold detection (в секундах)
-    /// 0 = disabled (нажатие срабатывает сразу)
-    /// > 0 = требуется удержание клавиши на указанное время
-    public let holdDurationThreshold: TimeInterval
-
-    public init(name: String, keyCode: CGKeyCode, displayName: String, modifiers: CGEventFlags = [], holdDurationThreshold: TimeInterval = 0) {
+    public init(name: String, keyCode: CGKeyCode, displayName: String, modifiers: CGEventFlags = []) {
         self.name = name
         self.keyCode = keyCode
         self.displayName = displayName
         self.modifiers = modifiers
-        self.holdDurationThreshold = holdDurationThreshold
-    }
-
-    // MARK: - Computed Properties
-
-    /// Требуется ли долгое нажатие для активации
-    public var requiresHold: Bool {
-        return holdDurationThreshold > 0
     }
 
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case name, keyCode, displayName, modifiers, holdDurationThreshold
+        case name, keyCode, displayName, modifiers
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -213,7 +216,6 @@ public struct Hotkey: Identifiable, Codable, Equatable {
         try container.encode(keyCode, forKey: .keyCode)
         try container.encode(displayName, forKey: .displayName)
         try container.encode(modifiers.rawValue, forKey: .modifiers)
-        try container.encode(holdDurationThreshold, forKey: .holdDurationThreshold)
     }
 
     public init(from decoder: Decoder) throws {
@@ -223,13 +225,12 @@ public struct Hotkey: Identifiable, Codable, Equatable {
         displayName = try container.decode(String.self, forKey: .displayName)
         let modifiersRaw = try container.decodeIfPresent(UInt64.self, forKey: .modifiers) ?? 0
         modifiers = CGEventFlags(rawValue: modifiersRaw)
-        holdDurationThreshold = try container.decodeIfPresent(TimeInterval.self, forKey: .holdDurationThreshold) ?? 0
     }
 
     // MARK: - Equatable
 
     public static func == (lhs: Hotkey, rhs: Hotkey) -> Bool {
-        return lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers && lhs.holdDurationThreshold == rhs.holdDurationThreshold
+        return lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers
     }
 }
 

@@ -66,7 +66,7 @@ public struct HotkeyRecorderView: View {
                 }
             }
 
-            Text("Совет: ESC для отмены. Используйте модификаторы (⌘⌥⌃⇧) для более сложных комбинаций.")
+            Text("F1–F19 без модификаторов или любая клавиша с ⌘ / ⌥ / ⌃. ESC для отмены.")
                 .font(.caption2)
                 .foregroundColor(.orange)
         }
@@ -117,6 +117,11 @@ public struct HotkeyRecorderView: View {
         }
     }
 
+    private static let functionKeyCodes: Set<UInt16> = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, // F1-F12
+        105, 107, 113, 106, 64, 79, 80                           // F13-F19
+    ]
+
     private func handleKeyEvent(_ event: NSEvent) {
         // Escape отменяет запись
         if event.keyCode == 53 { // Escape
@@ -137,6 +142,21 @@ public struct HotkeyRecorderView: View {
         // Получаем модификаторы
         let modifiers = extractModifiers(from: event.modifierFlags)
 
+        // Проверяем: regular key без ⌘/⌥/⌃ — запрещено
+        let isFunctionKey = HotkeyRecorderView.functionKeyCodes.contains(keyCode)
+        let meaningfulModifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl]
+        let hasMeaningfulModifier = !modifiers.intersection(meaningfulModifiers).isEmpty
+
+        if !isFunctionKey && !hasMeaningfulModifier {
+            recordedKeyCombo = "⚠️ Нужен ⌘/⌥/⌃ или используйте F1–F19"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if self.isRecording {
+                    self.recordedKeyCombo = "Press any key..."
+                }
+            }
+            return
+        }
+
         // Получаем название клавиши
         let keyName = keyCode.displayName
 
@@ -150,8 +170,6 @@ public struct HotkeyRecorderView: View {
         // Проверяем опасные комбинации
         if isDangerousCombination(keyCode: keyCode, modifiers: modifiers) {
             recordedKeyCombo = "⚠️ Системная комбинация запрещена"
-
-            // Через секунду возвращаем старое значение
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 if self.isRecording {
                     self.recordedKeyCombo = "Press any key..."

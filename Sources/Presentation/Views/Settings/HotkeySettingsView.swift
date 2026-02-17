@@ -47,73 +47,20 @@ struct HotkeySettingsView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    Text("Click the field above and press your desired hotkey combination")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            // Hold Detection Settings
-            SettingsCard(title: "Hold Detection", icon: "hand.point.up.fill", color: .orange) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Require long press to activate", isOn: Binding(
-                        get: { hotkeyManager.currentHotkey.requiresHold },
-                        set: { isEnabled in
-                            let newThreshold: TimeInterval = isEnabled ? 0.3 : 0
-                            let updatedHotkey = Hotkey(
-                                name: hotkeyManager.currentHotkey.name,
-                                keyCode: hotkeyManager.currentHotkey.keyCode,
-                                displayName: hotkeyManager.currentHotkey.displayName,
-                                modifiers: hotkeyManager.currentHotkey.modifiers,
-                                holdDurationThreshold: newThreshold
-                            )
-                            hotkeyManager.saveHotkey(updatedHotkey)
-                        }
-                    ))
-
-                    if hotkeyManager.currentHotkey.requiresHold {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Hold duration: ")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Text(String(format: "%.1fs", hotkeyManager.currentHotkey.holdDurationThreshold))
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.orange)
-                            }
-
-                            Slider(
-                                value: Binding(
-                                    get: { hotkeyManager.currentHotkey.holdDurationThreshold },
-                                    set: { newValue in
-                                        let updatedHotkey = Hotkey(
-                                            name: hotkeyManager.currentHotkey.name,
-                                            keyCode: hotkeyManager.currentHotkey.keyCode,
-                                            displayName: hotkeyManager.currentHotkey.displayName,
-                                            modifiers: hotkeyManager.currentHotkey.modifiers,
-                                            holdDurationThreshold: newValue
-                                        )
-                                        hotkeyManager.saveHotkey(updatedHotkey)
-                                    }
-                                ),
-                                in: 0.3...1.0,
-                                step: 0.1
-                            )
-
-                            HStack(spacing: 8) {
-                                Image(systemName: "info.circle")
-                                    .foregroundColor(.orange)
-                                Text("Short presses will have ~\(String(format: "%.0f", hotkeyManager.currentHotkey.holdDurationThreshold * 1000))ms delay")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Allowed keys:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("• F1–F19 without modifiers")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("• Any key with ⌘ / ⌥ / ⌃ modifier")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("Plain letter/symbol keys are not allowed (conflict with text input)")
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     }
-
-                    Text("When enabled, you must hold the key for the specified duration to activate recording. Short presses will work normally (e.g., typing tilde).")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                 }
             }
 
@@ -151,13 +98,19 @@ struct HotkeySettingsView: View {
             // Recommended Keys
             SettingsCard(title: "Recommended Keys", icon: "star.fill", color: .yellow) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("F13-F19: Function keys rarely used by apps")
+                    Text("F13–F19: Rarely used by other apps")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("Right Cmd/Option + key: Less likely to conflict with shortcuts")
+                    Text("⌥+key: Option + any letter/number (e.g. ⌥F or ⌥`)")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("Avoid: Cmd+Q, Cmd+W, Cmd+Tab (system shortcuts)")
+                    Text("⌃+key: Control + any key")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("Avoid: F1–F12 (system media/brightness keys)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("Avoid: ⌘Q, ⌘W, ⌘Tab (system shortcuts)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
