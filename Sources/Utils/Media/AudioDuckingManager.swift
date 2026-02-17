@@ -61,6 +61,13 @@ public class AudioDuckingManager: ObservableObject {
     /// Приглушить системное аудио (начало записи)
     /// - Parameter force: Если true, приглушает независимо от настроек (для Debug кнопок)
     public func duck(force: Bool = false) {
+        // Пауза медиа-плееров ПЕРВОЙ — пока плеер ещё активен, до заглушения громкости.
+        // Важно: setSystemVolume(0.0) через AppleScript провоцирует авто-паузу у некоторых
+        // плееров (Spotify и др.), из-за чего isPlaying() вернёт false и пауза не будет послана.
+        if pauseMediaEnabled || force {
+            mediaRemote.pause()
+        }
+
         // Приглушение громкости (только если включено или force)
         if (duckingEnabled && !isDucked) || force {
             print("AudioDuckingManager: \(muteOutputCompletely ? "Выключение" : "Приглушение") системного аудио\(force ? " (принудительно)" : "")...")
@@ -79,11 +86,6 @@ public class AudioDuckingManager: ObservableObject {
             }
 
             isDucked = true
-        }
-
-        // Пауза медиа-плееров (независимо от ducking!)
-        if pauseMediaEnabled || force {
-            mediaRemote.pause()
         }
     }
 
