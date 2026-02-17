@@ -26,4 +26,7 @@ public protocol HotkeyManagerProtocol: ObservableObject {
     /// - Parameter hotkey: Горячая клавиша для проверки
     /// - Returns: true если клавиша валидна, false иначе
     func isValidHotkey(_ hotkey: Hotkey) -> Bool
+
+    /// Загрузить сохранённую горячую клавишу
+    func loadHotkey() -> Hotkey?
 }

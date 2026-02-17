@@ -99,17 +99,19 @@ All services implement **protocols** for testability and dependency injection.
 
 #### 1. KeyboardMonitor (`Sources/Services/Implementation/KeyboardMonitor.swift`)
 - **Protocol**: `KeyboardMonitorProtocol`
-- **Technology**: Carbon Event Manager API (`RegisterEventHotKey`)
-- **Advantage**: Does NOT require Accessibility permissions for function keys (F13-F19)
+- **Technology**: CGEventTap API (requires Accessibility permissions)
 - **Modern API**: AsyncStream for hotkey events
 - **Features**:
-  - Supports F13-F19 and modifier keys (Right Cmd/Option/Control)
+  - Supports any key combination (letters, numbers, F-keys, modifiers)
+  - **Hold detection**: Configurable threshold to distinguish short press (key works normally) vs long press (activates recording)
   - Automatic hotkey re-registration when user changes preference
-  - Global event monitoring without Input Monitoring permissions
+  - Global event monitoring and filtering
+  - Event tap re-activation on timeout/user input
+  - Programmatic event generation for short-press passthrough in hold mode
 - **Key Methods**:
-  - `startMonitoring()` - Registers global hotkey with Carbon Event Manager
-  - `handleCarbonEvent()` - Processes kEventHotKeyPressed/Released events
+  - `startMonitoring()` - Creates CGEventTap for global hotkey monitoring
   - `hotkeyEvents: AsyncStream<HotkeyEvent>` - Modern async event stream
+- **File Size**: ~250 lines (with hold detection logic)
 
 #### 2. AudioCaptureService (`Sources/Services/Implementation/AudioCaptureService.swift`)
 - **Protocol**: `AudioCaptureServiceProtocol`
@@ -189,11 +191,14 @@ All managers implement **protocols** for dependency injection.
 - **Responsibility**: Hotkey configuration
 - **Features**:
   - Persists user hotkey preference to UserDefaults
-  - Validates hotkey combinations
-  - Supported keys: F13-F19, Right Command/Option/Control
+  - Validates hotkey combinations (prevents dangerous system shortcuts)
+  - Supports any key combination (letters, numbers, F-keys, modifiers)
+  - Automatic migration from old preset/custom storage format
 - **Key Methods**:
   - `saveHotkey(_ hotkey: Hotkey)` - Persist hotkey choice
-  - `isValidHotkey(_ hotkey: Hotkey)` - Validate hotkey combination
+  - `isValidHotkey(_ hotkey: Hotkey)` - Validate hotkey (blocks Cmd+Q, Cmd+W, Cmd+Tab)
+  - `loadHotkey()` - Load saved hotkey from UserDefaults
+- **File Size**: ~327 lines (simplified from ~373 lines by removing preset/custom modes)
 
 ### ViewModels
 
@@ -372,10 +377,11 @@ log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h
 
 **Required**:
 - ✅ Microphone access (AVFoundation) - for audio recording
+- ✅ Accessibility (CGEventTap + CGEvent.post) - for hotkey monitoring and text insertion
 
-**NOT Required** (thanks to Carbon API):
-- ❌ Accessibility - not needed for F-key hotkeys
-- ❌ Input Monitoring - not needed for Carbon RegisterEventHotKey
+**Automatic Prompt**:
+- System automatically prompts for Accessibility on first launch when CGEvent API is used
+- No manual entitlement configuration needed beyond existing `com.apple.security.automation.apple-events`
 
 **PermissionManager** (`Sources/Utils/PermissionManager.swift`)
 - Simplified permission checker (microphone only)
@@ -426,9 +432,12 @@ swift test
    ```bash
    log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "keyboard"'
    ```
-2. Carbon API does NOT require Accessibility permissions for F13-F19
-3. If using modifier keys (Cmd/Option/Control), ensure they're not conflicting with system shortcuts
-4. Verify hotkey registration in logs: look for "RegisterEventHotKey success"
+2. Verify Accessibility permissions:
+   - Open **System Settings** → **Privacy & Security** → **Accessibility**
+   - Ensure **PushToTalk** is enabled in the list
+   - Restart application after granting permission
+3. Check for conflicting system shortcuts (Cmd+Q, Cmd+W, Cmd+Tab are blocked)
+4. Verify hotkey registration in logs: look for "CGEventTap: мониторинг запущен"
 
 ### Missing Microphone Permission
 
@@ -491,10 +500,10 @@ log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h > logs.txt
 
 7. **Async/Await**: Modern concurrency with AsyncStream for events (hotkeys, audio chunks)
 8. **Reactive Programming**: Combine framework with @Published properties
-9. **Carbon API for Hotkeys**: More reliable than CGEventTap, no Accessibility permissions required
+9. **CGEventTap for Hotkeys**: Supports any key combination, robust tap re-activation on system timeout
 10. **Unified Logging**: All logs accessible through Console.app with proper categorization
 11. **On-device Processing**: WhisperKit runs entirely on device with Metal GPU acceleration
-12. **Minimal Permissions**: Only microphone access required, no Accessibility/Input Monitoring
+12. **Minimal Permissions**: Only microphone and Accessibility required (no Input Monitoring)
 13. **Performance Monitoring**: Real-Time Factor (RTF) tracking for transcription speed
 14. **Menu Bar Only**: Runs as accessory app without Dock icon
 

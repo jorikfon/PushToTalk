@@ -1,10 +1,34 @@
 import Cocoa
-import Carbon
 import Combine
 
-/// Глобальный мониторинг горячих клавиш через Carbon API (RegisterEventHotKey)
-/// НЕ требует Accessibility разрешения для F13-F19
-/// Блокирует media key events (Play/Pause) для F16 через CGEventTap
+/// Контекст для CGEventTap callback
+/// Используется как refcon для передачи данных в C-style callback
+private class HotkeyTapContext {
+    let keyCode: CGKeyCode
+    let modifiers: CGEventFlags
+    let holdDurationThreshold: TimeInterval
+    weak var monitor: KeyboardMonitor?
+
+    var isPressed: Bool = false
+    var keyDownTime: Date?
+    var holdTimer: DispatchWorkItem?
+    var isHoldActivated: Bool = false
+
+    init(keyCode: CGKeyCode, modifiers: CGEventFlags, holdDurationThreshold: TimeInterval, monitor: KeyboardMonitor) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+        self.holdDurationThreshold = holdDurationThreshold
+        self.monitor = monitor
+    }
+
+    /// Требуется ли долгое нажатие для активации
+    var requiresHold: Bool {
+        return holdDurationThreshold > 0
+    }
+}
+
+/// Глобальный мониторинг горячих клавиш через CGEventTap
+/// Требует Accessibility permissions для перехвата клавиш
 public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
     @Published public var isHotkeyPressed = false
 
@@ -30,22 +54,24 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
 
     // MARK: - Private Properties
 
-    private var hotKeyRef: EventHotKeyRef?
-    private var eventHandler: EventHandlerRef?
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    private var tapContext: HotkeyTapContext?
     private var isMonitoring = false
     private var cancellables = Set<AnyCancellable>()
 
     /// Continuation для AsyncStream событий
-    private var eventContinuation: AsyncStream<HotkeyEvent>.Continuation?
+    fileprivate var eventContinuation: AsyncStream<HotkeyEvent>.Continuation?
 
-    // Static reference для callback
-    private static var shared: KeyboardMonitor?
+    /// Текущая hotkey (читается из HotkeyManager)
+    private var currentHotkey: Hotkey {
+        return (ServiceContainer.shared.hotkeyManager as! HotkeyManager).currentHotkey
+    }
 
     // MARK: - Initialization
 
     public init() {
-        LogManager.keyboard.info("Инициализация KeyboardMonitor (Carbon API)")
-        KeyboardMonitor.shared = self
+        LogManager.keyboard.info("Инициализация KeyboardMonitor (CGEventTap)")
 
         // Подписываемся на изменения hotkey
         NotificationCenter.default.publisher(for: .hotkeyDidChange)
@@ -57,67 +83,174 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
             .store(in: &cancellables)
     }
 
+    // MARK: - Monitoring Control
+
     /// Начать мониторинг клавиатуры
     public func startMonitoring() -> Bool {
-        // Защита от повторного запуска
         guard !isMonitoring else {
             LogManager.keyboard.info("Мониторинг уже запущен, пропускаем")
             return true
         }
 
-        let hotkey = HotkeyManager.shared.currentHotkey
-        LogManager.keyboard.begin("Запуск мониторинга", details: "клавиша \(hotkey.displayName) (keyCode: \(hotkey.keyCode))")
+        let hotkey = currentHotkey
+        LogManager.keyboard.begin("Запуск мониторинга", details: "клавиша=\(hotkey.displayName) (keyCode: \(hotkey.keyCode))")
 
-        // Carbon API НЕ требует Accessibility для F13-F19
-        LogManager.keyboard.info("Carbon API не требует Accessibility разрешения для F-клавиш")
+        // Проверяем Accessibility
+        guard AXIsProcessTrusted() else {
+            LogManager.keyboard.error("CGEventTap: Accessibility не разрешен. Горячие клавиши недоступны.")
+            return false
+        }
 
-        // Регистрируем Carbon Event Handler для нажатия И отпускания
-        var eventTypes = [
-            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
-            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
-        ]
-        let status = InstallEventHandler(
-            GetApplicationEventTarget(),
-            { (nextHandler, event, userData) -> OSStatus in
-                return KeyboardMonitor.handleCarbonEvent(nextHandler: nextHandler, event: event, userData: userData)
+        // Создаём контекст для callback
+        let context = HotkeyTapContext(keyCode: hotkey.keyCode, modifiers: hotkey.modifiers, holdDurationThreshold: hotkey.holdDurationThreshold, monitor: self)
+        self.tapContext = context
+
+        // Указатель на контекст для C-style callback
+        let contextPtr = Unmanaged.passRetained(context).toOpaque()
+
+        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
+                guard let refcon = refcon else {
+                    return Unmanaged.passRetained(event)
+                }
+
+                let ctx = Unmanaged<HotkeyTapContext>.fromOpaque(refcon).takeUnretainedValue()
+
+                // Если tap был отключён системой — включаем обратно
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    if let monitor = ctx.monitor {
+                        LogManager.keyboard.info("CGEventTap: tap был отключён, переактивируем")
+                        if let tap = monitor.eventTap {
+                            CGEvent.tapEnable(tap: tap, enable: true)
+                        }
+                    }
+                    return Unmanaged.passRetained(event)
+                }
+
+                let eventKeyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+
+                // Проверяем совпадение keyCode
+                guard eventKeyCode == ctx.keyCode else {
+                    return Unmanaged.passRetained(event)
+                }
+
+                // Проверяем модификаторы (если заданы)
+                if !ctx.modifiers.isEmpty {
+                    let eventFlags = event.flags
+                    // Маска для пользовательских модификаторов (без device-independent flags)
+                    let relevantMask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
+                    let eventMods = eventFlags.intersection(relevantMask)
+                    let targetMods = ctx.modifiers.intersection(relevantMask)
+
+                    guard eventMods == targetMods else {
+                        return Unmanaged.passRetained(event)
+                    }
+                }
+
+                // Обрабатываем press/release с hold detection
+                if type == .keyDown && !ctx.isPressed {
+                    ctx.isPressed = true
+                    ctx.keyDownTime = Date()
+
+                    if ctx.requiresHold {
+                        // Hold mode: ждём порог перед активацией
+                        let holdTimer = DispatchWorkItem { [weak ctx] in
+                            guard let ctx = ctx else { return }
+                            // Порог достигнут - активируем hold
+                            ctx.isHoldActivated = true
+                            DispatchQueue.main.async {
+                                ctx.monitor?.isHotkeyPressed = true
+                                ctx.monitor?.eventContinuation?.yield(.pressed)
+                                ctx.monitor?.onHotkeyPress?()
+                                LogManager.keyboard.info("Горячая клавиша активирована (hold): \(ctx.keyCode.displayName)")
+                            }
+                        }
+                        ctx.holdTimer = holdTimer
+                        DispatchQueue.main.asyncAfter(deadline: .now() + ctx.holdDurationThreshold, execute: holdTimer)
+                        LogManager.keyboard.debug("Ожидание hold threshold: \(ctx.holdDurationThreshold)s для \(ctx.keyCode.displayName)")
+                        return nil // Поглощаем keyDown (ждём hold или короткое нажатие)
+                    } else {
+                        // Instant mode: активация сразу
+                        DispatchQueue.main.async {
+                            ctx.monitor?.isHotkeyPressed = true
+                            ctx.monitor?.eventContinuation?.yield(.pressed)
+                            ctx.monitor?.onHotkeyPress?()
+                            LogManager.keyboard.info("Горячая клавиша нажата: \(ctx.keyCode.displayName)")
+                        }
+                        return nil // Поглощаем событие
+                    }
+                } else if type == .keyUp && ctx.isPressed {
+                    ctx.isPressed = false
+
+                    if ctx.requiresHold {
+                        if ctx.isHoldActivated {
+                            // Hold был активирован - обрабатываем release
+                            ctx.isHoldActivated = false
+                            DispatchQueue.main.async {
+                                ctx.monitor?.isHotkeyPressed = false
+                                ctx.monitor?.eventContinuation?.yield(.released)
+                                ctx.monitor?.onHotkeyRelease?()
+                                LogManager.keyboard.info("Горячая клавиша отпущена (hold): \(ctx.keyCode.displayName)")
+                            }
+                            return nil // Поглощаем keyUp
+                        } else {
+                            // Короткое нажатие - отменяем таймер и пропускаем событие
+                            ctx.holdTimer?.cancel()
+                            ctx.holdTimer = nil
+                            LogManager.keyboard.debug("Короткое нажатие: пропускаем keyDown+keyUp для \(ctx.keyCode.displayName)")
+
+                            // Программно генерируем keyDown + keyUp для passthrough
+                            DispatchQueue.main.async {
+                                guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+                                if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: ctx.keyCode, keyDown: true),
+                                   let keyUp = CGEvent(keyboardEventSource: source, virtualKey: ctx.keyCode, keyDown: false) {
+                                    keyDown.flags = ctx.modifiers
+                                    keyUp.flags = ctx.modifiers
+                                    keyDown.post(tap: .cghidEventTap)
+                                    usleep(50000) // 50ms между down и up
+                                    keyUp.post(tap: .cghidEventTap)
+                                    LogManager.keyboard.debug("Программно сгенерированы keyDown+keyUp для \(ctx.keyCode.displayName)")
+                                }
+                            }
+                            return nil // Поглощаем keyUp (уже сгенерировали events)
+                        }
+                    } else {
+                        // Instant mode: release сразу
+                        DispatchQueue.main.async {
+                            ctx.monitor?.isHotkeyPressed = false
+                            ctx.monitor?.eventContinuation?.yield(.released)
+                            ctx.monitor?.onHotkeyRelease?()
+                            LogManager.keyboard.info("Горячая клавиша отпущена: \(ctx.keyCode.displayName)")
+                        }
+                        return nil // Поглощаем событие
+                    }
+                }
+
+                return Unmanaged.passRetained(event)
             },
-            2,  // Теперь 2 типа событий
-            &eventTypes,
-            nil,
-            &eventHandler
-        )
-
-        guard status == noErr else {
-            LogManager.keyboard.error("Не удалось установить Carbon Event Handler: \(status)")
+            userInfo: contextPtr
+        ) else {
+            LogManager.keyboard.error("CGEventTap: не удалось создать event tap")
+            Unmanaged<HotkeyTapContext>.fromOpaque(contextPtr).release()
+            self.tapContext = nil
             return false
         }
 
-        // Регистрируем горячую клавишу
-        let hotkeyID = EventHotKeyID(signature: OSType(0x50545400), id: 1) // 'PTT\0'
-        let modifiers = carbonModifiers(from: hotkey.modifiers)
+        self.eventTap = tap
 
-        let registerStatus = RegisterEventHotKey(
-            UInt32(hotkey.keyCode),
-            modifiers,
-            hotkeyID,
-            GetApplicationEventTarget(),
-            OptionBits(kEventHotKeyExclusive),  // Эксклюзивный захват - блокируем системные обработчики
-            &hotKeyRef
-        )
-
-        guard registerStatus == noErr else {
-            LogManager.keyboard.error("Не удалось зарегистрировать горячую клавишу: \(registerStatus)")
-            if let handler = eventHandler {
-                RemoveEventHandler(handler)
-                eventHandler = nil
-            }
-            return false
-        }
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        self.runLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
 
         isMonitoring = true
-
-        LogManager.keyboard.success("Мониторинг запущен", details: "Carbon API для \(hotkey.displayName)")
-
+        LogManager.keyboard.success("Мониторинг запущен", details: "CGEventTap для \(hotkey.displayName)")
         return true
     }
 
@@ -127,19 +260,26 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
 
         LogManager.keyboard.begin("Остановка мониторинга")
 
-        // Отменяем регистрацию горячей клавиши
-        if let hotKeyRef = hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+            eventTap = nil
         }
 
-        // Удаляем event handler
-        if let eventHandler = eventHandler {
-            RemoveEventHandler(eventHandler)
-            self.eventHandler = nil
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+            runLoopSource = nil
+        }
+
+        // Освобождаем контекст
+        if let context = tapContext {
+            // Release retained reference from passRetained
+            Unmanaged.passUnretained(context).release()
+            tapContext = nil
         }
 
         isMonitoring = false
+        isHotkeyPressed = false
         LogManager.keyboard.success("Мониторинг остановлен")
     }
 
@@ -150,91 +290,8 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
         _ = startMonitoring()
     }
 
-    // MARK: - Carbon Event Handler
-
-    private static func handleCarbonEvent(nextHandler: EventHandlerCallRef?, event: EventRef?, userData: UnsafeMutableRawPointer?) -> OSStatus {
-        guard let monitor = KeyboardMonitor.shared, let event = event else {
-            return OSStatus(eventNotHandledErr)
-        }
-
-        var hotKeyID = EventHotKeyID()
-        let status = GetEventParameter(
-            event,
-            UInt32(kEventParamDirectObject),
-            UInt32(typeEventHotKeyID),
-            nil,
-            MemoryLayout<EventHotKeyID>.size,
-            nil,
-            &hotKeyID
-        )
-
-        guard status == noErr else {
-            return OSStatus(eventNotHandledErr)
-        }
-
-        // Проверяем что это наша горячая клавиша
-        if hotKeyID.signature == OSType(0x50545400) && hotKeyID.id == 1 {
-            let hotkey = HotkeyManager.shared.currentHotkey
-
-            // Определяем тип события через GetEventKind (pressed vs released)
-            let eventKind = GetEventKind(event)
-
-            if eventKind == UInt32(kEventHotKeyPressed) {
-                monitor.isHotkeyPressed = true
-                LogManager.keyboard.info("Горячая клавиша нажата: \(hotkey.displayName)")
-
-                // Отправляем событие в AsyncStream
-                monitor.eventContinuation?.yield(.pressed)
-
-                // Вызываем deprecated callback для backwards compatibility
-                DispatchQueue.main.async {
-                    monitor.onHotkeyPress?()
-                }
-            } else if eventKind == UInt32(kEventHotKeyReleased) {
-                monitor.isHotkeyPressed = false
-                LogManager.keyboard.info("Горячая клавиша отпущена: \(hotkey.displayName)")
-
-                // Отправляем событие в AsyncStream
-                monitor.eventContinuation?.yield(.released)
-
-                // Вызываем deprecated callback для backwards compatibility
-                DispatchQueue.main.async {
-                    monitor.onHotkeyRelease?()
-                }
-            }
-
-            // ВАЖНО: Возвращаем noErr чтобы съесть событие полностью
-            return noErr
-        }
-
-        return OSStatus(eventNotHandledErr)
-    }
-
-    // MARK: - Helper Methods
-
-    /// Конвертация CGEventFlags в Carbon модификаторы
-    private func carbonModifiers(from flags: CGEventFlags) -> UInt32 {
-        var modifiers: UInt32 = 0
-
-        if flags.contains(.maskCommand) {
-            modifiers |= UInt32(cmdKey)
-        }
-        if flags.contains(.maskShift) {
-            modifiers |= UInt32(shiftKey)
-        }
-        if flags.contains(.maskAlternate) {
-            modifiers |= UInt32(optionKey)
-        }
-        if flags.contains(.maskControl) {
-            modifiers |= UInt32(controlKey)
-        }
-
-        return modifiers
-    }
-
     deinit {
         stopMonitoring()
-        KeyboardMonitor.shared = nil
         LogManager.keyboard.info("KeyboardMonitor деинициализирован")
     }
 }

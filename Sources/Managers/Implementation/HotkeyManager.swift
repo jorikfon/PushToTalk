@@ -1,9 +1,9 @@
-//
+  //
 //  HotkeyManager.swift
 //  PushToTalk
 //
-//  Менеджер для управления горячими клавишами F13-F19
-//  Использует Carbon API (не требует Accessibility разрешения)
+//  Менеджер для управления горячими клавишами
+//  Использует CGEventTap для всех hotkeys (требует Accessibility permissions)
 //
 
 import Foundation
@@ -29,31 +29,40 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
 
     private let storageKey = "pushToTalkHotkey"
 
+    /// Опасные системные комбинации
+    private static let dangerousKeyCodes: Set<UInt16> = [12, 13, 48] // Q, W, Tab
+
     // MARK: - Computed Properties (Protocol)
 
     public var currentKeyCode: CGKeyCode {
         return currentHotkey.keyCode
     }
 
+    // MARK: - Default Hotkey
+
+    public static let defaultHotkey = Hotkey(name: "F16", keyCode: 106, displayName: "F16", modifiers: [])
+
     // MARK: - Initialization
 
     public init() {
         // F16 по умолчанию (инициализация перед loadHotkey)
-        currentHotkey = Hotkey(name: "F16", keyCode: 106, displayName: "F16", modifiers: [])
+        currentHotkey = HotkeyManager.defaultHotkey
 
         // Загружаем сохранённую горячую клавишу
         if let saved = loadHotkey() {
             currentHotkey = saved
         }
 
-        LogManager.keyboard.info("HotkeyManager инициализирован с клавишей \(self.currentHotkey.displayName)")
+        // Миграция со старых форматов хранения
+        migrateOldStorageIfNeeded()
+
+        LogManager.keyboard.info("HotkeyManager инициализирован: клавиша=\(self.currentHotkey.displayName)")
     }
 
     // MARK: - Protocol Methods
 
     /// Сохранение текущей горячей клавиши
     public func saveHotkey(_ hotkey: Hotkey) {
-        // Проверяем валидность горячей клавиши
         guard isValidHotkey(hotkey) else {
             LogManager.keyboard.error("Попытка сохранить невалидную клавишу: \(hotkey.displayName)")
             return
@@ -62,8 +71,7 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
         currentHotkey = hotkey
 
         do {
-            let encoder = JSONEncoder()
-            let data = try encoder.encode(hotkey)
+            let data = try JSONEncoder().encode(hotkey)
             UserDefaults.standard.set(data, forKey: storageKey)
         } catch {
             LogManager.keyboard.failure("Сохранение горячей клавиши", error: error)
@@ -76,44 +84,96 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
         NotificationCenter.default.post(name: .hotkeyDidChange, object: hotkey)
     }
 
-    /// Проверка валидности hotkey (только F13-F19)
+    /// Проверка валидности горячей клавиши
     public func isValidHotkey(_ hotkey: Hotkey) -> Bool {
-        // Разрешены только F13-F19
-        let allowedKeyCodes: Set<CGKeyCode> = [105, 107, 113, 106, 64, 79, 80] // F13-F19
-        return allowedKeyCodes.contains(hotkey.keyCode)
+        // Запрещаем modifier-only клавиши
+        let modifierOnlyKeys: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62]
+        if modifierOnlyKeys.contains(hotkey.keyCode) {
+            return false
+        }
+
+        // Запрещаем опасные системные комбинации (Cmd+Q, Cmd+W, Cmd+Tab)
+        if hotkey.modifiers.contains(.maskCommand) && HotkeyManager.dangerousKeyCodes.contains(hotkey.keyCode) {
+            return false
+        }
+
+        return true
     }
 
-    // MARK: - Private Methods
-
     /// Загрузка сохранённой горячей клавиши
-    private func loadHotkey() -> Hotkey? {
+    public func loadHotkey() -> Hotkey? {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else {
             return nil
         }
 
         do {
-            let decoder = JSONDecoder()
-            let hotkey = try decoder.decode(Hotkey.self, from: data)
+            let hotkey = try JSONDecoder().decode(Hotkey.self, from: data)
 
-            // Проверяем валидность загруженной клавиши
             guard isValidHotkey(hotkey) else {
                 LogManager.keyboard.error("Загруженная клавиша невалидна: \(hotkey.displayName)")
                 UserDefaults.standard.removeObject(forKey: storageKey)
                 return nil
             }
 
-            LogManager.keyboard.success("Горячая клавиша загружена", details: hotkey.displayName)
             return hotkey
         } catch {
             LogManager.keyboard.failure("Загрузка горячей клавиши", error: error)
             return nil
         }
     }
+
+    // MARK: - Private Methods
+
+    /// Миграция со старых форматов хранения (preset/custom режимы)
+    private func migrateOldStorageIfNeeded() {
+        let oldPresetKey = "pushToTalkPresetHotkey"
+        let oldCustomKey = "pushToTalkCustomHotkey"
+        let oldModeKey = "pushToTalkHotkeyMode"
+
+        // Проверяем, есть ли старые ключи
+        var migratedHotkey: Hotkey?
+
+        // Пытаемся загрузить из старого preset ключа
+        if let presetData = UserDefaults.standard.data(forKey: oldPresetKey) {
+            migratedHotkey = try? JSONDecoder().decode(Hotkey.self, from: presetData)
+        }
+
+        // Если нет preset, пытаемся загрузить из custom
+        if migratedHotkey == nil, let customData = UserDefaults.standard.data(forKey: oldCustomKey) {
+            migratedHotkey = try? JSONDecoder().decode(Hotkey.self, from: customData)
+        }
+
+        // Если нашли старую hotkey - мигрируем
+        if let oldHotkey = migratedHotkey {
+            // Конвертируем в новый формат (без source)
+            let newHotkey = Hotkey(
+                name: oldHotkey.name,
+                keyCode: oldHotkey.keyCode,
+                displayName: oldHotkey.displayName,
+                modifiers: oldHotkey.modifiers
+            )
+
+            do {
+                let data = try JSONEncoder().encode(newHotkey)
+                UserDefaults.standard.set(data, forKey: storageKey)
+                currentHotkey = newHotkey
+
+                // Удаляем старые ключи
+                UserDefaults.standard.removeObject(forKey: oldPresetKey)
+                UserDefaults.standard.removeObject(forKey: oldCustomKey)
+                UserDefaults.standard.removeObject(forKey: oldModeKey)
+
+                LogManager.keyboard.info("Миграция горячей клавиши из старого формата: \(newHotkey.displayName)")
+            } catch {
+                LogManager.keyboard.failure("Миграция горячей клавиши", error: error)
+            }
+        }
+    }
 }
 
 // MARK: - Hotkey
 
-/// Структура для представления горячей клавиши F13-F19
+/// Структура для представления горячей клавиши
 public struct Hotkey: Identifiable, Codable, Equatable {
     public let id = UUID()
     public let name: String
@@ -121,17 +181,30 @@ public struct Hotkey: Identifiable, Codable, Equatable {
     public let displayName: String
     public let modifiers: CGEventFlags
 
-    public init(name: String, keyCode: CGKeyCode, displayName: String, modifiers: CGEventFlags = []) {
+    /// Порог длительности нажатия для hold detection (в секундах)
+    /// 0 = disabled (нажатие срабатывает сразу)
+    /// > 0 = требуется удержание клавиши на указанное время
+    public let holdDurationThreshold: TimeInterval
+
+    public init(name: String, keyCode: CGKeyCode, displayName: String, modifiers: CGEventFlags = [], holdDurationThreshold: TimeInterval = 0) {
         self.name = name
         self.keyCode = keyCode
         self.displayName = displayName
         self.modifiers = modifiers
+        self.holdDurationThreshold = holdDurationThreshold
+    }
+
+    // MARK: - Computed Properties
+
+    /// Требуется ли долгое нажатие для активации
+    public var requiresHold: Bool {
+        return holdDurationThreshold > 0
     }
 
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case name, keyCode, displayName, modifiers
+        case name, keyCode, displayName, modifiers, holdDurationThreshold
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -140,6 +213,7 @@ public struct Hotkey: Identifiable, Codable, Equatable {
         try container.encode(keyCode, forKey: .keyCode)
         try container.encode(displayName, forKey: .displayName)
         try container.encode(modifiers.rawValue, forKey: .modifiers)
+        try container.encode(holdDurationThreshold, forKey: .holdDurationThreshold)
     }
 
     public init(from decoder: Decoder) throws {
@@ -149,12 +223,13 @@ public struct Hotkey: Identifiable, Codable, Equatable {
         displayName = try container.decode(String.self, forKey: .displayName)
         let modifiersRaw = try container.decodeIfPresent(UInt64.self, forKey: .modifiers) ?? 0
         modifiers = CGEventFlags(rawValue: modifiersRaw)
+        holdDurationThreshold = try container.decodeIfPresent(TimeInterval.self, forKey: .holdDurationThreshold) ?? 0
     }
 
     // MARK: - Equatable
 
     public static func == (lhs: Hotkey, rhs: Hotkey) -> Bool {
-        return lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers
+        return lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers && lhs.holdDurationThreshold == rhs.holdDurationThreshold
     }
 }
 
@@ -229,6 +304,7 @@ public extension CGKeyCode {
         case 36: return "Return"
         case 48: return "Tab"
         case 49: return "Space"
+        case 50: return "`"
         case 51: return "Delete"
         case 117: return "Forward Delete"
         case 53: return "Escape"

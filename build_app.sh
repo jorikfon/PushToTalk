@@ -19,6 +19,8 @@ APP_DIR="build/${APP_NAME}.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+ENTITLEMENTS="Entitlements.plist"
+SIGNING_IDENTITY="Developer ID Application: MIKO OOO (XM6SL4JUGF)"
 
 # Clean previous build
 echo -e "${YELLOW}[1/6] Cleaning previous build...${NC}"
@@ -84,29 +86,36 @@ else
     exit 1
 fi
 
-# Sign the app with ad-hoc signature
-echo -e "${YELLOW}[6/7] Signing app bundle...${NC}"
+# Sign the app with Developer ID
+echo -e "${YELLOW}[6/7] Signing app bundle with Developer ID...${NC}"
 
-# Sign with entitlements if available
-ENTITLEMENTS_FILE="Resources/PushToTalk.entitlements"
-if [ -f "${ENTITLEMENTS_FILE}" ]; then
-    codesign --force --deep --sign - --entitlements "${ENTITLEMENTS_FILE}" "${APP_DIR}" 2>/dev/null
+# Check if signing identity is available
+if security find-identity -v -p codesigning | grep -q "${SIGNING_IDENTITY}"; then
+    codesign \
+        --sign "${SIGNING_IDENTITY}" \
+        --force \
+        --deep \
+        --timestamp \
+        --options runtime \
+        --entitlements "${ENTITLEMENTS}" \
+        "${APP_DIR}"
+
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ App signed with ad-hoc signature + entitlements${NC}"
-        echo -e "${GREEN}   Entitlements: ${ENTITLEMENTS_FILE}${NC}"
+        echo -e "${GREEN}✅ App signed with Developer ID + Hardened Runtime${NC}"
     else
-        # Fallback without entitlements
-        codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null
-        echo -e "${GREEN}✅ App signed with ad-hoc signature (no entitlements)${NC}"
+        echo -e "${RED}❌ Developer ID signing failed, falling back to ad-hoc${NC}"
+        codesign --force --deep --sign - --entitlements "${ENTITLEMENTS}" "${APP_DIR}" 2>/dev/null
+        echo -e "${YELLOW}⚠️  App signed with ad-hoc signature${NC}"
     fi
 else
-    codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null
-    echo -e "${GREEN}✅ App signed with ad-hoc signature (no entitlements found)${NC}"
+    echo -e "${YELLOW}⚠️  Developer ID certificate not found, using ad-hoc signing${NC}"
+    codesign --force --deep --sign - --entitlements "${ENTITLEMENTS}" "${APP_DIR}" 2>/dev/null
+    echo -e "${YELLOW}⚠️  App signed with ad-hoc signature${NC}"
 fi
 
 # Verify signature
-SIGN_INFO=$(codesign -dvv "${APP_DIR}" 2>&1 | grep "Identifier=" | cut -d= -f2)
-echo -e "${GREEN}   Identifier: ${SIGN_INFO}${NC}"
+SIGN_INFO=$(codesign -dvv "${APP_DIR}" 2>&1 | grep "Authority=" | head -1)
+echo -e "${GREEN}   ${SIGN_INFO}${NC}"
 
 # Verify app bundle structure
 echo -e "${YELLOW}[7/7] Verifying .app bundle structure...${NC}"
