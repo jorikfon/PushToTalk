@@ -67,9 +67,24 @@ public class MediaRemoteManager {
     /// Возобновляет воспроизведение, если мы вызывали pause()
     /// - Parameter force: Если true, возобновляет независимо от флага didPause (для Debug кнопок)
     /// Использует Toggle вместо прямой команды Play — совместимо со Spotify и другими плеерами
+    /// Проверяет isPlaying() перед toggle, чтобы не поставить на паузу уже играющий плеер
     public func resume(force: Bool = false) {
-        // Возобновляем только если мы вызывали pause() или force = true
-        if didPause || force {
+        guard didPause || force else {
+            LogManager.app.debug("MediaRemoteManager: Пауза не вызывалась, не возобновляем")
+            return
+        }
+
+        didPause = false
+
+        // Проверяем, не играет ли уже (пользователь мог возобновить вручную)
+        isPlaying { [weak self] playing in
+            guard self != nil else { return }
+
+            if playing {
+                LogManager.app.debug("MediaRemoteManager: Уже воспроизводится, toggle не нужен")
+                return
+            }
+
             LogManager.app.info("MediaRemoteManager: Возобновляем воспроизведение через toggle\(force ? " (принудительно)" : "")...")
 
             let success = MRMediaRemoteSendCommand(MRMediaRemoteCommandTogglePlayPause, nil)
@@ -79,10 +94,6 @@ public class MediaRemoteManager {
             } else {
                 LogManager.app.warning("MediaRemoteManager: Не удалось возобновить воспроизведение")
             }
-
-            didPause = false
-        } else {
-            LogManager.app.debug("MediaRemoteManager: Пауза не вызывалась, не возобновляем")
         }
     }
 

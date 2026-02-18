@@ -10,9 +10,9 @@ struct HotkeySettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             // Accessibility Info
             if !hasAccessibility {
-                SettingsCard(title: "Accessibility Required", icon: "exclamationmark.triangle.fill", color: .orange) {
+                SettingsCard(title: Strings.Hotkeys.accessibilityRequired, icon: "exclamationmark.triangle.fill", color: .orange) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("PushToTalk requires Accessibility permissions to capture hotkeys and insert transcribed text.")
+                        Text(Strings.Hotkeys.accessibilityDescription)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
@@ -23,7 +23,7 @@ struct HotkeySettingsView: View {
                                 hasAccessibility = AXIsProcessTrusted()
                             }
                         } label: {
-                            Label("Open System Settings", systemImage: "gear")
+                            Label(Strings.Hotkeys.openSystemSettings, systemImage: "gear")
                                 .font(.subheadline)
                         }
                     }
@@ -42,22 +42,22 @@ struct HotkeySettingsView: View {
                             }
                         ))
                     } else {
-                        Text("Enable Accessibility permissions to customize hotkey")
+                        Text(Strings.Hotkeys.accessibilityDisabledHint)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Allowed keys:")
+                        Text(Strings.Hotkeys.allowedKeys)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("• F1–F19 without modifiers")
+                        Text("• " + Strings.Hotkeys.fKeysAllowed)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("• Any key with ⌘ / ⌥ / ⌃ modifier")
+                        Text("• " + Strings.Hotkeys.modifierKeysAllowed)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("Plain letter/symbol keys are not allowed (conflict with text input)")
+                        Text(Strings.Hotkeys.plainKeysNotAllowed)
                             .font(.caption)
                             .foregroundColor(.orange)
                     }
@@ -87,30 +87,30 @@ struct HotkeySettingsView: View {
             }
 
             // Instructions
-            SettingsCard(title: "How to Use", icon: "questionmark.circle", color: .cyan) {
+            SettingsCard(title: Strings.Hotkeys.howToUse, icon: "questionmark.circle", color: .cyan) {
                 VStack(alignment: .leading, spacing: 12) {
-                    InstructionRow(icon: "hand.tap", text: "Press and hold the hotkey to start recording")
-                    InstructionRow(icon: "text.bubble", text: "Release the hotkey to transcribe")
-                    InstructionRow(icon: "character.cursor.ibeam", text: "Text will be inserted at cursor position")
+                    InstructionRow(icon: "hand.tap", text: Strings.Hotkeys.howToUseHold)
+                    InstructionRow(icon: "text.bubble", text: Strings.Hotkeys.howToUseRelease)
+                    InstructionRow(icon: "character.cursor.ibeam", text: Strings.Hotkeys.howToUseInsert)
                 }
             }
 
             // Recommended Keys
-            SettingsCard(title: "Recommended Keys", icon: "star.fill", color: .yellow) {
+            SettingsCard(title: Strings.Hotkeys.recommendedKeys, icon: "star.fill", color: .yellow) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("F13–F19: Rarely used by other apps")
+                    Text(Strings.Hotkeys.recommendedF13F19)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("⌥+key: Option + any letter/number (e.g. ⌥F or ⌥`)")
+                    Text(Strings.Hotkeys.recommendedOption)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("⌃+key: Control + any key")
+                    Text(Strings.Hotkeys.recommendedControl)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("Avoid: F1–F12 (system media/brightness keys)")
+                    Text(Strings.Hotkeys.avoidF1F12)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("Avoid: ⌘Q, ⌘W, ⌘Tab (system shortcuts)")
+                    Text(Strings.Hotkeys.avoidSystemShortcuts)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

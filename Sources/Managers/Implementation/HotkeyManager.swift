@@ -29,11 +29,14 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
 
     private let storageKey = "pushToTalkHotkey"
 
-    /// Опасные системные комбинации
-    private static let dangerousKeyCodes: Set<UInt16> = [12, 13, 48] // Q, W, Tab
+    /// Опасные системные комбинации (Cmd+Q, Cmd+W, Cmd+Tab)
+    public static let dangerousKeyCodes: Set<UInt16> = [12, 13, 48]
+
+    /// Modifier-only клавиши (Command, Shift, Option, Control — левые и правые)
+    public static let modifierOnlyKeys: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62]
 
     /// Коды F-клавиш (F1-F19), разрешённых без модификаторов
-    private static let functionKeyCodes: Set<CGKeyCode> = [
+    public static let functionKeyCodes: Set<CGKeyCode> = [
         122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, // F1-F12
         105, 107, 113, 106, 64, 79, 80                           // F13-F19
     ]
@@ -93,8 +96,7 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
     /// Проверка валидности горячей клавиши
     public func isValidHotkey(_ hotkey: Hotkey) -> Bool {
         // Запрещаем modifier-only клавиши
-        let modifierOnlyKeys: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62]
-        if modifierOnlyKeys.contains(hotkey.keyCode) {
+        if HotkeyManager.modifierOnlyKeys.contains(hotkey.keyCode) {
             return false
         }
 

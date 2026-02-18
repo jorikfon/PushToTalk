@@ -102,16 +102,16 @@ All services implement **protocols** for testability and dependency injection.
 - **Technology**: CGEventTap API (requires Accessibility permissions)
 - **Modern API**: AsyncStream for hotkey events
 - **Features**:
-  - Supports any key combination (letters, numbers, F-keys, modifiers)
-  - **Hold detection**: Configurable threshold to distinguish short press (key works normally) vs long press (activates recording)
+  - Supports F-keys without modifiers and any key with modifier combinations
   - Automatic hotkey re-registration when user changes preference
   - Global event monitoring and filtering
   - Event tap re-activation on timeout/user input
-  - Programmatic event generation for short-press passthrough in hold mode
+  - Simple press/release detection (events consumed to prevent passthrough)
 - **Key Methods**:
   - `startMonitoring()` - Creates CGEventTap for global hotkey monitoring
   - `hotkeyEvents: AsyncStream<HotkeyEvent>` - Modern async event stream
-- **File Size**: ~250 lines (with hold detection logic)
+- **HotkeyTapContext**: Minimal context class with `keyCode`, `modifiers`, `monitor`, `isPressed`
+- **File Size**: ~230 lines
 
 #### 2. AudioCaptureService (`Sources/Services/Implementation/AudioCaptureService.swift`)
 - **Protocol**: `AudioCaptureServiceProtocol`
@@ -188,17 +188,21 @@ All managers implement **protocols** for dependency injection.
 
 #### 4. HotkeyManager (`Sources/Managers/Implementation/HotkeyManager.swift`)
 - **Protocol**: `HotkeyManagerProtocol`
-- **Responsibility**: Hotkey configuration
+- **Responsibility**: Hotkey configuration and validation
 - **Features**:
   - Persists user hotkey preference to UserDefaults
-  - Validates hotkey combinations (prevents dangerous system shortcuts)
-  - Supports any key combination (letters, numbers, F-keys, modifiers)
+  - **Key constraint validation**: F-keys (F1-F19) allowed without modifiers; all other keys require a modifier (Cmd/Opt/Ctrl)
+  - Rejects modifier-only keys, plain letter/symbol keys without modifier, and dangerous system shortcuts
   - Automatic migration from old preset/custom storage format
+- **Public Static Constants**:
+  - `functionKeyCodes: Set<CGKeyCode>` - F1-F19 key codes (allowed without modifiers)
+  - `modifierOnlyKeys: Set<UInt16>` - Command, Shift, Option, Control key codes (rejected as hotkeys)
+  - `dangerousKeyCodes: Set<UInt16>` - Q, W, Tab key codes (blocked with Cmd modifier)
 - **Key Methods**:
   - `saveHotkey(_ hotkey: Hotkey)` - Persist hotkey choice
-  - `isValidHotkey(_ hotkey: Hotkey)` - Validate hotkey (blocks Cmd+Q, Cmd+W, Cmd+Tab)
+  - `isValidHotkey(_ hotkey: Hotkey)` - Validate hotkey against key constraints
   - `loadHotkey()` - Load saved hotkey from UserDefaults
-- **File Size**: ~327 lines (simplified from ~373 lines by removing preset/custom modes)
+- **File Size**: ~345 lines
 
 ### ViewModels
 
@@ -262,7 +266,7 @@ Sources/
 │       ├── Settings/
 │       │   ├── GeneralSettingsView.swift      (~125 lines)
 │       │   ├── ModelSettingsView.swift        (~147 lines)
-│       │   ├── HotkeySettingsView.swift       (~80 lines)
+│       │   ├── HotkeySettingsView.swift       (~123 lines)
 │       │   ├── VocabularySettingsView.swift   (~259 lines)
 │       │   ├── AudioSettingsView.swift        (~109 lines)
 │       │   ├── HistorySettingsView.swift      (~206 lines)
@@ -299,13 +303,13 @@ Sources/
 │       ├── ModelManager.swift                 (~235 lines)
 │       ├── AudioDeviceManager.swift           (~239 lines)
 │       ├── VocabularyManager.swift            (~174 lines)
-│       └── HotkeyManager.swift                (~270 lines)
+│       └── HotkeyManager.swift                (~345 lines)
 │
 ├── Utils/
 │   ├── Constants/
 │   │   ├── AppConstants.swift                 (~160 lines)
 │   │   ├── UIConstants.swift                  (~260 lines)
-│   │   └── Strings.swift                      (~284 lines)
+│   │   └── Strings.swift                      (~359 lines)
 │   │
 │   ├── Extensions/
 │   │   ├── String+Extensions.swift            (~147 lines)
@@ -369,8 +373,8 @@ log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h
 - **Strings**: All user-facing text with NSLocalizedString support
 
 **Localization** (`Resources/Localization/`)
-- **English**: `en.lproj/Localizable.strings` (~150+ keys)
-- **Russian**: `ru.lproj/Localizable.strings` (~150+ translations)
+- **English**: `en.lproj/Localizable.strings` (~250 keys)
+- **Russian**: `ru.lproj/Localizable.strings` (~250 translations)
 - Automatic language selection based on system preferences
 
 ### Permissions
@@ -437,7 +441,7 @@ swift test
    - Ensure **PushToTalk** is enabled in the list
    - Restart application after granting permission
 3. Check for conflicting system shortcuts (Cmd+Q, Cmd+W, Cmd+Tab are blocked)
-4. Verify hotkey registration in logs: look for "CGEventTap: мониторинг запущен"
+4. Verify hotkey registration in logs: look for "Мониторинг запущен"
 
 ### Missing Microphone Permission
 
@@ -500,7 +504,7 @@ log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h > logs.txt
 
 7. **Async/Await**: Modern concurrency with AsyncStream for events (hotkeys, audio chunks)
 8. **Reactive Programming**: Combine framework with @Published properties
-9. **CGEventTap for Hotkeys**: Supports any key combination, robust tap re-activation on system timeout
+9. **CGEventTap for Hotkeys**: Restricted to F-keys or modifier combos, robust tap re-activation on system timeout
 10. **Unified Logging**: All logs accessible through Console.app with proper categorization
 11. **On-device Processing**: WhisperKit runs entirely on device with Metal GPU acceleration
 12. **Minimal Permissions**: Only microphone and Accessibility required (no Input Monitoring)
@@ -527,8 +531,7 @@ log show --predicate 'subsystem == "com.pushtotalk.app"' --last 1h > logs.txt
 
 ### Services (Protocol + Implementation)
 
-- Keyboard monitoring: `Sources/Services/Implementation/KeyboardMonitor.swift:113` - Hotkey registration
-- Carbon event handling: `Sources/Services/Implementation/KeyboardMonitor.swift:168` - Event processing
+- Keyboard monitoring: `Sources/Services/Implementation/KeyboardMonitor.swift:79` - Hotkey registration via CGEventTap
 - AsyncStream hotkey events: `Sources/Services/Protocols/KeyboardMonitorProtocol.swift:12`
 - Audio recording start: `Sources/Services/Implementation/AudioCaptureService.swift:41`
 - AsyncStream audio chunks: `Sources/Services/Protocols/AudioCaptureServiceProtocol.swift:14`
