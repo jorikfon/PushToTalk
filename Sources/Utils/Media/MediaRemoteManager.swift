@@ -37,8 +37,9 @@ public class MediaRemoteManager {
         }
     }
 
-    /// Отправляет команду паузы медиа-плееру
+    /// Отправляет команду паузы медиа-плееру через TogglePlayPause
     /// Проверяет, воспроизводится ли что-то — если нет, не ставит на паузу
+    /// Использует Toggle вместо прямой команды Pause — совместимо со Spotify и другими плеерами
     public func pause() {
         LogManager.app.info("MediaRemoteManager: Проверяем состояние воспроизведения перед паузой...")
 
@@ -51,11 +52,11 @@ public class MediaRemoteManager {
                 return
             }
 
-            let success = MRMediaRemoteSendCommand(MRMediaRemoteCommandPause, nil)
+            let success = MRMediaRemoteSendCommand(MRMediaRemoteCommandTogglePlayPause, nil)
 
             if success {
                 self.didPause = true
-                LogManager.app.success("MediaRemoteManager: ✓ Команда паузы отправлена")
+                LogManager.app.success("MediaRemoteManager: ✓ Пауза через toggle отправлена")
             } else {
                 self.didPause = false
                 LogManager.app.warning("MediaRemoteManager: Не удалось отправить команду паузы")
@@ -65,22 +66,34 @@ public class MediaRemoteManager {
 
     /// Возобновляет воспроизведение, если мы вызывали pause()
     /// - Parameter force: Если true, возобновляет независимо от флага didPause (для Debug кнопок)
+    /// Использует Toggle вместо прямой команды Play — совместимо со Spotify и другими плеерами
+    /// Проверяет isPlaying() перед toggle, чтобы не поставить на паузу уже играющий плеер
     public func resume(force: Bool = false) {
-        // Возобновляем только если мы вызывали pause() или force = true
-        if didPause || force {
-            LogManager.app.info("MediaRemoteManager: Возобновляем воспроизведение\(force ? " (принудительно)" : "")...")
+        guard didPause || force else {
+            LogManager.app.debug("MediaRemoteManager: Пауза не вызывалась, не возобновляем")
+            return
+        }
 
-            let success = MRMediaRemoteSendCommand(MRMediaRemoteCommandPlay, nil)
+        didPause = false
+
+        // Проверяем, не играет ли уже (пользователь мог возобновить вручную)
+        isPlaying { [weak self] playing in
+            guard self != nil else { return }
+
+            if playing {
+                LogManager.app.debug("MediaRemoteManager: Уже воспроизводится, toggle не нужен")
+                return
+            }
+
+            LogManager.app.info("MediaRemoteManager: Возобновляем воспроизведение через toggle\(force ? " (принудительно)" : "")...")
+
+            let success = MRMediaRemoteSendCommand(MRMediaRemoteCommandTogglePlayPause, nil)
 
             if success {
-                LogManager.app.success("MediaRemoteManager: ✓ Воспроизведение возобновлено")
+                LogManager.app.success("MediaRemoteManager: ✓ Воспроизведение возобновлено через toggle")
             } else {
                 LogManager.app.warning("MediaRemoteManager: Не удалось возобновить воспроизведение")
             }
-
-            didPause = false
-        } else {
-            LogManager.app.debug("MediaRemoteManager: Пауза не вызывалась, не возобновляем")
         }
     }
 

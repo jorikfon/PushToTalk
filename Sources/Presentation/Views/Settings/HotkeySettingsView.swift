@@ -10,9 +10,9 @@ struct HotkeySettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             // Accessibility Info
             if !hasAccessibility {
-                SettingsCard(title: "Accessibility Required", icon: "exclamationmark.triangle.fill", color: .orange) {
+                SettingsCard(title: Strings.Hotkeys.accessibilityRequired, icon: "exclamationmark.triangle.fill", color: .orange) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("PushToTalk requires Accessibility permissions to capture hotkeys and insert transcribed text.")
+                        Text(Strings.Hotkeys.accessibilityDescription)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
@@ -23,7 +23,7 @@ struct HotkeySettingsView: View {
                                 hasAccessibility = AXIsProcessTrusted()
                             }
                         } label: {
-                            Label("Open System Settings", systemImage: "gear")
+                            Label(Strings.Hotkeys.openSystemSettings, systemImage: "gear")
                                 .font(.subheadline)
                         }
                     }
@@ -42,78 +42,25 @@ struct HotkeySettingsView: View {
                             }
                         ))
                     } else {
-                        Text("Enable Accessibility permissions to customize hotkey")
+                        Text(Strings.Hotkeys.accessibilityDisabledHint)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
 
-                    Text("Click the field above and press your desired hotkey combination")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            // Hold Detection Settings
-            SettingsCard(title: "Hold Detection", icon: "hand.point.up.fill", color: .orange) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Require long press to activate", isOn: Binding(
-                        get: { hotkeyManager.currentHotkey.requiresHold },
-                        set: { isEnabled in
-                            let newThreshold: TimeInterval = isEnabled ? 0.3 : 0
-                            let updatedHotkey = Hotkey(
-                                name: hotkeyManager.currentHotkey.name,
-                                keyCode: hotkeyManager.currentHotkey.keyCode,
-                                displayName: hotkeyManager.currentHotkey.displayName,
-                                modifiers: hotkeyManager.currentHotkey.modifiers,
-                                holdDurationThreshold: newThreshold
-                            )
-                            hotkeyManager.saveHotkey(updatedHotkey)
-                        }
-                    ))
-
-                    if hotkeyManager.currentHotkey.requiresHold {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Hold duration: ")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Text(String(format: "%.1fs", hotkeyManager.currentHotkey.holdDurationThreshold))
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.orange)
-                            }
-
-                            Slider(
-                                value: Binding(
-                                    get: { hotkeyManager.currentHotkey.holdDurationThreshold },
-                                    set: { newValue in
-                                        let updatedHotkey = Hotkey(
-                                            name: hotkeyManager.currentHotkey.name,
-                                            keyCode: hotkeyManager.currentHotkey.keyCode,
-                                            displayName: hotkeyManager.currentHotkey.displayName,
-                                            modifiers: hotkeyManager.currentHotkey.modifiers,
-                                            holdDurationThreshold: newValue
-                                        )
-                                        hotkeyManager.saveHotkey(updatedHotkey)
-                                    }
-                                ),
-                                in: 0.3...1.0,
-                                step: 0.1
-                            )
-
-                            HStack(spacing: 8) {
-                                Image(systemName: "info.circle")
-                                    .foregroundColor(.orange)
-                                Text("Short presses will have ~\(String(format: "%.0f", hotkeyManager.currentHotkey.holdDurationThreshold * 1000))ms delay")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(Strings.Hotkeys.allowedKeys)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("• " + Strings.Hotkeys.fKeysAllowed)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("• " + Strings.Hotkeys.modifierKeysAllowed)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(Strings.Hotkeys.plainKeysNotAllowed)
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     }
-
-                    Text("When enabled, you must hold the key for the specified duration to activate recording. Short presses will work normally (e.g., typing tilde).")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                 }
             }
 
@@ -140,24 +87,30 @@ struct HotkeySettingsView: View {
             }
 
             // Instructions
-            SettingsCard(title: "How to Use", icon: "questionmark.circle", color: .cyan) {
+            SettingsCard(title: Strings.Hotkeys.howToUse, icon: "questionmark.circle", color: .cyan) {
                 VStack(alignment: .leading, spacing: 12) {
-                    InstructionRow(icon: "hand.tap", text: "Press and hold the hotkey to start recording")
-                    InstructionRow(icon: "text.bubble", text: "Release the hotkey to transcribe")
-                    InstructionRow(icon: "character.cursor.ibeam", text: "Text will be inserted at cursor position")
+                    InstructionRow(icon: "hand.tap", text: Strings.Hotkeys.howToUseHold)
+                    InstructionRow(icon: "text.bubble", text: Strings.Hotkeys.howToUseRelease)
+                    InstructionRow(icon: "character.cursor.ibeam", text: Strings.Hotkeys.howToUseInsert)
                 }
             }
 
             // Recommended Keys
-            SettingsCard(title: "Recommended Keys", icon: "star.fill", color: .yellow) {
+            SettingsCard(title: Strings.Hotkeys.recommendedKeys, icon: "star.fill", color: .yellow) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("F13-F19: Function keys rarely used by apps")
+                    Text(Strings.Hotkeys.recommendedF13F19)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("Right Cmd/Option + key: Less likely to conflict with shortcuts")
+                    Text(Strings.Hotkeys.recommendedOption)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("Avoid: Cmd+Q, Cmd+W, Cmd+Tab (system shortcuts)")
+                    Text(Strings.Hotkeys.recommendedControl)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(Strings.Hotkeys.avoidF1F12)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(Strings.Hotkeys.avoidSystemShortcuts)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

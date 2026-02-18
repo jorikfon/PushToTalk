@@ -6,24 +6,14 @@ import Combine
 private class HotkeyTapContext {
     let keyCode: CGKeyCode
     let modifiers: CGEventFlags
-    let holdDurationThreshold: TimeInterval
     weak var monitor: KeyboardMonitor?
 
     var isPressed: Bool = false
-    var keyDownTime: Date?
-    var holdTimer: DispatchWorkItem?
-    var isHoldActivated: Bool = false
 
-    init(keyCode: CGKeyCode, modifiers: CGEventFlags, holdDurationThreshold: TimeInterval, monitor: KeyboardMonitor) {
+    init(keyCode: CGKeyCode, modifiers: CGEventFlags, monitor: KeyboardMonitor) {
         self.keyCode = keyCode
         self.modifiers = modifiers
-        self.holdDurationThreshold = holdDurationThreshold
         self.monitor = monitor
-    }
-
-    /// Требуется ли долгое нажатие для активации
-    var requiresHold: Bool {
-        return holdDurationThreshold > 0
     }
 }
 
@@ -102,7 +92,7 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
         }
 
         // Создаём контекст для callback
-        let context = HotkeyTapContext(keyCode: hotkey.keyCode, modifiers: hotkey.modifiers, holdDurationThreshold: hotkey.holdDurationThreshold, monitor: self)
+        let context = HotkeyTapContext(keyCode: hotkey.keyCode, modifiers: hotkey.modifiers, monitor: self)
         self.tapContext = context
 
         // Указатель на контекст для C-style callback
@@ -153,83 +143,27 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
                     }
                 }
 
-                // Обрабатываем press/release с hold detection
-                if type == .keyDown && !ctx.isPressed {
-                    ctx.isPressed = true
-                    ctx.keyDownTime = Date()
-
-                    if ctx.requiresHold {
-                        // Hold mode: ждём порог перед активацией
-                        let holdTimer = DispatchWorkItem { [weak ctx] in
-                            guard let ctx = ctx else { return }
-                            // Порог достигнут - активируем hold
-                            ctx.isHoldActivated = true
-                            DispatchQueue.main.async {
-                                ctx.monitor?.isHotkeyPressed = true
-                                ctx.monitor?.eventContinuation?.yield(.pressed)
-                                ctx.monitor?.onHotkeyPress?()
-                                LogManager.keyboard.info("Горячая клавиша активирована (hold): \(ctx.keyCode.displayName)")
-                            }
-                        }
-                        ctx.holdTimer = holdTimer
-                        DispatchQueue.main.asyncAfter(deadline: .now() + ctx.holdDurationThreshold, execute: holdTimer)
-                        LogManager.keyboard.debug("Ожидание hold threshold: \(ctx.holdDurationThreshold)s для \(ctx.keyCode.displayName)")
-                        return nil // Поглощаем keyDown (ждём hold или короткое нажатие)
-                    } else {
-                        // Instant mode: активация сразу
+                // Обрабатываем press/release
+                if type == .keyDown {
+                    if !ctx.isPressed {
+                        ctx.isPressed = true
                         DispatchQueue.main.async {
                             ctx.monitor?.isHotkeyPressed = true
                             ctx.monitor?.eventContinuation?.yield(.pressed)
                             ctx.monitor?.onHotkeyPress?()
                             LogManager.keyboard.info("Горячая клавиша нажата: \(ctx.keyCode.displayName)")
                         }
-                        return nil // Поглощаем событие
                     }
+                    return nil // Поглощаем все keyDown (включая повторы при удержании)
                 } else if type == .keyUp && ctx.isPressed {
                     ctx.isPressed = false
-
-                    if ctx.requiresHold {
-                        if ctx.isHoldActivated {
-                            // Hold был активирован - обрабатываем release
-                            ctx.isHoldActivated = false
-                            DispatchQueue.main.async {
-                                ctx.monitor?.isHotkeyPressed = false
-                                ctx.monitor?.eventContinuation?.yield(.released)
-                                ctx.monitor?.onHotkeyRelease?()
-                                LogManager.keyboard.info("Горячая клавиша отпущена (hold): \(ctx.keyCode.displayName)")
-                            }
-                            return nil // Поглощаем keyUp
-                        } else {
-                            // Короткое нажатие - отменяем таймер и пропускаем событие
-                            ctx.holdTimer?.cancel()
-                            ctx.holdTimer = nil
-                            LogManager.keyboard.debug("Короткое нажатие: пропускаем keyDown+keyUp для \(ctx.keyCode.displayName)")
-
-                            // Программно генерируем keyDown + keyUp для passthrough
-                            DispatchQueue.main.async {
-                                guard let source = CGEventSource(stateID: .hidSystemState) else { return }
-                                if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: ctx.keyCode, keyDown: true),
-                                   let keyUp = CGEvent(keyboardEventSource: source, virtualKey: ctx.keyCode, keyDown: false) {
-                                    keyDown.flags = ctx.modifiers
-                                    keyUp.flags = ctx.modifiers
-                                    keyDown.post(tap: .cghidEventTap)
-                                    usleep(50000) // 50ms между down и up
-                                    keyUp.post(tap: .cghidEventTap)
-                                    LogManager.keyboard.debug("Программно сгенерированы keyDown+keyUp для \(ctx.keyCode.displayName)")
-                                }
-                            }
-                            return nil // Поглощаем keyUp (уже сгенерировали events)
-                        }
-                    } else {
-                        // Instant mode: release сразу
-                        DispatchQueue.main.async {
-                            ctx.monitor?.isHotkeyPressed = false
-                            ctx.monitor?.eventContinuation?.yield(.released)
-                            ctx.monitor?.onHotkeyRelease?()
-                            LogManager.keyboard.info("Горячая клавиша отпущена: \(ctx.keyCode.displayName)")
-                        }
-                        return nil // Поглощаем событие
+                    DispatchQueue.main.async {
+                        ctx.monitor?.isHotkeyPressed = false
+                        ctx.monitor?.eventContinuation?.yield(.released)
+                        ctx.monitor?.onHotkeyRelease?()
+                        LogManager.keyboard.info("Горячая клавиша отпущена: \(ctx.keyCode.displayName)")
                     }
+                    return nil // Поглощаем событие
                 }
 
                 return Unmanaged.passRetained(event)

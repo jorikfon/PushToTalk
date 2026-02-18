@@ -15,7 +15,7 @@
 ## ✨ Возможности
 
 - 🎤 **Приложение в Menu Bar** - Чистый нативный macOS интерфейс
-- ⌨️ **Настраиваемые горячие клавиши** - F13-F19, Right Cmd/Option/Control
+- ⌨️ **Настраиваемые горячие клавиши** - F1-F19, любая клавиша с модификатором (⌘/⌥/⌃)
 - 🪟 **Liquid Glass UI** - Минималистичное всплывающее окно с эффектом стекла
 - 🧠 **WhisperKit Integration** - OpenAI Whisper на Apple Neural Engine
 - 🚀 **Оптимизация для Apple Silicon** - Metal ускорение, нулевая нагрузка в режиме ожидания
@@ -61,7 +61,7 @@
 | Архитектура | Clean Architecture + MVVM + Coordinator |
 | ML Framework | WhisperKit (MLX-based) |
 | Аудио | AVFoundation |
-| Горячие клавиши | Carbon Event Manager API |
+| Горячие клавиши | CGEventTap API (Accessibility) |
 | UI | SwiftUI + AppKit |
 | DI | ServiceContainer (Protocol-based) |
 | Локализация | EN/RU (расширяемо) |
@@ -113,11 +113,9 @@ open build/PushToTalk.app
    - Системные настройки → Конфиденциальность и безопасность → Микрофон
    - ✅ Включите **PushToTalk**
 
-2. **Accessibility** - Требуется только для вставки текста
+2. **Accessibility** - Требуется для мониторинга горячих клавиш и вставки текста
    - Системные настройки → Конфиденциальность и безопасность → Универсальный доступ
    - ✅ Включите **PushToTalk**
-
-**Примечание**: Для мониторинга F-клавиш (F13-F19) Accessibility НЕ требуется благодаря использованию Carbon API!
 
 ---
 
@@ -133,7 +131,7 @@ open build/PushToTalk.app
 
 **Нажмите на иконку** чтобы открыть настройки:
 - Выбор модели Whisper (Tiny/Base/Small/Medium/Large)
-- Выбор горячей клавиши (F13-F19, Right Cmd/Option/Control)
+- Выбор горячей клавиши (F-keys или комбинации с модификатором)
 - Multilingual режим (автоопределение языка)
 - Автоматическая вставка EarPods подсказки
 - Транскрипция аудио файлов (drag & drop или файловый диалог)
@@ -159,10 +157,10 @@ Drag & drop или выберите аудио файлы:
 По умолчанию: **F16**
 
 Поддерживаются:
-- **F13-F19** - Не требуют Accessibility разрешений!
-- **Right Command** - Правый ⌘
-- **Right Option** - Правый ⌥
-- **Right Control** - Правый ⌃
+- **F1-F19** - Функциональные клавиши без модификаторов
+- **Любая клавиша + ⌘/⌥/⌃** - Комбинации с модификатором (например, ⌥F или ⌃Space)
+
+**Ограничения**: Обычные буквы/символы без модификатора запрещены (конфликт с текстовым вводом). Требуется Accessibility разрешение.
 
 ### Команда "отмена"
 
@@ -377,18 +375,12 @@ swift build
 
 ### Мониторинг клавиатуры
 
-**Два метода**:
-
-1. **Carbon Event Manager** (основной, для F13-F19)
-   - `RegisterEventHotKey` API
-   - НЕ требует Accessibility разрешений
-   - Работает только с F-клавишами и модификаторами
-   - Более надежный, меньше конфликтов
-
-2. **CGEvent Tap** (fallback, для других клавиш)
-   - Глобальный event tap
-   - Требует Accessibility разрешения
-   - Работает с любыми клавишами
+**CGEventTap API** (единственный метод):
+- Глобальный event tap через `CGEvent.tapCreate`
+- Требует Accessibility разрешения
+- Ограничен безопасными комбинациями: F-keys (F1-F19) без модификаторов или любая клавиша с модификатором (Cmd/Opt/Ctrl)
+- Автоматическая переактивация при отключении системой
+- События горячей клавиши поглощаются (не передаются в приложения)
 
 ### Вставка текста
 
@@ -480,7 +472,7 @@ swift build
    ```bash
    log stream --predicate 'subsystem == "com.pushtotalk.app" && category == "keyboard"'
    ```
-2. Carbon API НЕ требует Accessibility для F13-F19
+2. Убедитесь, что Accessibility разрешение предоставлено (требуется для CGEventTap)
 3. Убедитесь, что F16 не назначена на другое действие в системе
 4. Попробуйте другую F-клавишу (F13-F19)
 
@@ -502,13 +494,13 @@ swift build
 - [x] Исследование WhisperKit и proof-of-concept
 - [x] Захват аудио (AVFoundation)
 - [x] Транскрипция Whisper (WhisperKit)
-- [x] Мониторинг F16 (Carbon API + CGEvent)
+- [x] Мониторинг F16 (CGEventTap)
 - [x] Вставка текста (Clipboard + Accessibility)
 - [x] Menu bar UI (SwiftUI + AppKit)
 - [x] Liquid Glass всплывающее окно
 - [x] Звуковая обратная связь
 - [x] Управление разрешениями
-- [x] Настраиваемые горячие клавиши (F13-F19, Right Cmd/Option/Control)
+- [x] Настраиваемые горячие клавиши (F-keys, модификатор + клавиша)
 - [x] Выбор модели Whisper (Tiny/Base/Small/Medium/Large)
 - [x] Multilingual режим
 - [x] Real-time транскрипция

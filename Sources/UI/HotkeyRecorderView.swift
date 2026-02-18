@@ -6,7 +6,7 @@ import AppKit
 public struct HotkeyRecorderView: View {
     @Binding var hotkey: Hotkey?
     @State private var isRecording: Bool = false
-    @State private var recordedKeyCombo: String = "Click to record..."
+    @State private var recordedKeyCombo: String = Strings.Hotkeys.clickToRecord
     @State private var localMonitor: Any?
     @State private var globalMonitor: Any?
 
@@ -16,7 +16,7 @@ public struct HotkeyRecorderView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Нажмите любую комбинацию клавиш:")
+            Text(Strings.Hotkeys.pressHotkey)
                 .font(.caption)
                 .foregroundColor(.secondary)
 
@@ -38,7 +38,7 @@ public struct HotkeyRecorderView: View {
                         .foregroundColor(isRecording ? .red : .primary)
 
                     if isRecording {
-                        Text("Recording...")
+                        Text(Strings.Hotkeys.recording)
                             .font(.caption)
                             .foregroundColor(.red)
                     }
@@ -60,13 +60,13 @@ public struct HotkeyRecorderView: View {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
-                    Text("Current: \(currentHotkey.displayName)")
+                    Text("\(Strings.Hotkeys.currentHotkey): \(currentHotkey.displayName)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
 
-            Text("Совет: ESC для отмены. Используйте модификаторы (⌘⌥⌃⇧) для более сложных комбинаций.")
+            Text(Strings.Hotkeys.recorderHint)
                 .font(.caption2)
                 .foregroundColor(.orange)
         }
@@ -82,7 +82,7 @@ public struct HotkeyRecorderView: View {
 
     private func startRecording() {
         isRecording = true
-        recordedKeyCombo = "Press any key..."
+        recordedKeyCombo = Strings.Hotkeys.pressAnyKey
 
         // Создаём локальный event monitor для перехвата клавиш в нашем окне
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
@@ -94,10 +94,7 @@ public struct HotkeyRecorderView: View {
         // Создаём глобальный event monitor чтобы БЛОКИРОВАТЬ F-клавиши для системы
         // Это предотвратит появление Emoji picker
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
-            // Если это F13-F19, просто игнорируем
-            // (система не получит событие и не покажет Emoji picker)
-            let fKeyCodes: Set<UInt16> = [105, 107, 113, 106, 64, 79, 80] // F13-F19
-            if fKeyCodes.contains(event.keyCode) {
+            if HotkeyManager.functionKeyCodes.contains(event.keyCode) {
                 // Событие заблокировано для системы
             }
         }
@@ -121,21 +118,35 @@ public struct HotkeyRecorderView: View {
         // Escape отменяет запись
         if event.keyCode == 53 { // Escape
             stopRecording()
-            recordedKeyCombo = hotkey?.displayName ?? "Click to record..."
+            recordedKeyCombo = hotkey?.displayName ?? Strings.Hotkeys.clickToRecord
             return
         }
 
         let keyCode = event.keyCode
 
         // Игнорируем чисто modifier keys (Command, Shift, Option, Control)
-        let modifierOnlyKeys: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62]
-        if modifierOnlyKeys.contains(keyCode) {
-            recordedKeyCombo = "⚠️ Добавьте основную клавишу к модификатору"
+        if HotkeyManager.modifierOnlyKeys.contains(keyCode) {
+            recordedKeyCombo = "⚠️ " + Strings.Hotkeys.addMainKey
             return
         }
 
         // Получаем модификаторы
         let modifiers = extractModifiers(from: event.modifierFlags)
+
+        // Проверяем: regular key без ⌘/⌥/⌃ — запрещено
+        let isFunctionKey = HotkeyManager.functionKeyCodes.contains(keyCode)
+        let meaningfulModifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl]
+        let hasMeaningfulModifier = !modifiers.intersection(meaningfulModifiers).isEmpty
+
+        if !isFunctionKey && !hasMeaningfulModifier {
+            recordedKeyCombo = "⚠️ " + Strings.Hotkeys.needModifierOrFKey
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if self.isRecording {
+                    self.recordedKeyCombo = Strings.Hotkeys.pressAnyKey
+                }
+            }
+            return
+        }
 
         // Получаем название клавиши
         let keyName = keyCode.displayName
@@ -149,12 +160,10 @@ public struct HotkeyRecorderView: View {
 
         // Проверяем опасные комбинации
         if isDangerousCombination(keyCode: keyCode, modifiers: modifiers) {
-            recordedKeyCombo = "⚠️ Системная комбинация запрещена"
-
-            // Через секунду возвращаем старое значение
+            recordedKeyCombo = "⚠️ " + Strings.Hotkeys.dangerousCombination
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 if self.isRecording {
-                    self.recordedKeyCombo = "Press any key..."
+                    self.recordedKeyCombo = Strings.Hotkeys.pressAnyKey
                 }
             }
             return
@@ -200,18 +209,7 @@ public struct HotkeyRecorderView: View {
 
     /// Проверка опасных системных комбинаций
     private func isDangerousCombination(keyCode: UInt16, modifiers: CGEventFlags) -> Bool {
-        // Запрещаем Cmd+Q, Cmd+W, Cmd+Tab
-        let dangerousKeyCodes: Set<UInt16> = [
-            12,  // Q (Cmd+Q = Quit)
-            13,  // W (Cmd+W = Close window)
-            48,  // Tab (Cmd+Tab = App switcher)
-        ]
-
-        if modifiers.contains(.maskCommand) && dangerousKeyCodes.contains(keyCode) {
-            return true
-        }
-
-        return false
+        return modifiers.contains(.maskCommand) && HotkeyManager.dangerousKeyCodes.contains(keyCode)
     }
 }
 

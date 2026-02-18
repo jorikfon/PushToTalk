@@ -96,6 +96,34 @@ public enum Strings {
         public static let customMode = NSLocalizedString("hotkeys.customMode", bundle: bundle, comment: "Custom Hotkey mode label")
         public static let modeSelection = NSLocalizedString("hotkeys.modeSelection", bundle: bundle, comment: "Hotkey Mode selection label")
         public static let accessibilityRequired = NSLocalizedString("hotkeys.accessibilityRequired", bundle: bundle, comment: "Accessibility permission required message")
+
+        // Key constraints UI
+        public static let allowedKeys = NSLocalizedString("hotkeys.allowedKeys", bundle: bundle, comment: "Allowed keys label")
+        public static let fKeysAllowed = NSLocalizedString("hotkeys.fKeysAllowed", bundle: bundle, comment: "F-keys allowed without modifiers")
+        public static let modifierKeysAllowed = NSLocalizedString("hotkeys.modifierKeysAllowed", bundle: bundle, comment: "Any key with modifier allowed")
+        public static let plainKeysNotAllowed = NSLocalizedString("hotkeys.plainKeysNotAllowed", bundle: bundle, comment: "Plain keys not allowed warning")
+        public static let recommendedKeys = NSLocalizedString("hotkeys.recommendedKeys", bundle: bundle, comment: "Recommended Keys card title")
+        public static let recommendedF13F19 = NSLocalizedString("hotkeys.recommendedF13F19", bundle: bundle, comment: "F13-F19 recommendation")
+        public static let recommendedOption = NSLocalizedString("hotkeys.recommendedOption", bundle: bundle, comment: "Option+key recommendation")
+        public static let recommendedControl = NSLocalizedString("hotkeys.recommendedControl", bundle: bundle, comment: "Control+key recommendation")
+        public static let avoidF1F12 = NSLocalizedString("hotkeys.avoidF1F12", bundle: bundle, comment: "Avoid F1-F12 tip")
+        public static let avoidSystemShortcuts = NSLocalizedString("hotkeys.avoidSystemShortcuts", bundle: bundle, comment: "Avoid system shortcuts tip")
+        public static let howToUse = NSLocalizedString("hotkeys.howToUse", bundle: bundle, comment: "How to Use card title")
+        public static let howToUseHold = NSLocalizedString("hotkeys.howToUseHold", bundle: bundle, comment: "Hold hotkey instruction")
+        public static let howToUseRelease = NSLocalizedString("hotkeys.howToUseRelease", bundle: bundle, comment: "Release hotkey instruction")
+        public static let howToUseInsert = NSLocalizedString("hotkeys.howToUseInsert", bundle: bundle, comment: "Text insert instruction")
+        public static let accessibilityDescription = NSLocalizedString("hotkeys.accessibilityDescription", bundle: bundle, comment: "Accessibility permission description")
+        public static let openSystemSettings = NSLocalizedString("hotkeys.openSystemSettings", bundle: bundle, comment: "Open System Settings button")
+        public static let accessibilityDisabledHint = NSLocalizedString("hotkeys.accessibilityDisabledHint", bundle: bundle, comment: "Enable accessibility hint")
+
+        // Recorder
+        public static let pressAnyKey = NSLocalizedString("hotkeys.pressAnyKey", bundle: bundle, comment: "Press any key prompt")
+        public static let clickToRecord = NSLocalizedString("hotkeys.clickToRecord", bundle: bundle, comment: "Click to record prompt")
+        public static let recording = NSLocalizedString("hotkeys.recording", bundle: bundle, comment: "Recording indicator")
+        public static let addMainKey = NSLocalizedString("hotkeys.addMainKey", bundle: bundle, comment: "Add main key to modifier warning")
+        public static let needModifierOrFKey = NSLocalizedString("hotkeys.needModifierOrFKey", bundle: bundle, comment: "Need modifier or F-key warning")
+        public static let dangerousCombination = NSLocalizedString("hotkeys.dangerousCombination", bundle: bundle, comment: "Dangerous system combination warning")
+        public static let recorderHint = NSLocalizedString("hotkeys.recorderHint", bundle: bundle, comment: "Recorder usage hint")
     }
 
     // MARK: - Vocabulary Settings
