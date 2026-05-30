@@ -130,11 +130,18 @@ public struct HotkeyRecorderView: View {
             return
         }
 
+        // fn / 🌐 — разрешена без модификаторов (как F-клавиши).
+        // flagsChanged для fn приходит дважды (нажатие и отпускание) — берём только нажатие.
+        let isFnKey = (keyCode == HotkeyManager.fnKeyCode)
+        if isFnKey && !event.modifierFlags.contains(.function) {
+            return // отпускание fn — игнорируем
+        }
+
         // Получаем модификаторы
         let modifiers = extractModifiers(from: event.modifierFlags)
 
         // Проверяем: regular key без ⌘/⌥/⌃ — запрещено
-        let isFunctionKey = HotkeyManager.functionKeyCodes.contains(keyCode)
+        let isFunctionKey = HotkeyManager.functionKeyCodes.contains(keyCode) || isFnKey
         let meaningfulModifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl]
         let hasMeaningfulModifier = !modifiers.intersection(meaningfulModifiers).isEmpty
 

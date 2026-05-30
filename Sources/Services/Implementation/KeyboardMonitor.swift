@@ -143,6 +143,34 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
                     }
                 }
 
+                // fn (Globe) приходит как flagsChanged, а не keyDown/keyUp.
+                // Нажатие/отпускание определяем по флагу maskSecondaryFn.
+                // Сюда доходят только flagsChanged с keyCode == ctx.keyCode (т.е. fn),
+                // т.к. модификаторы с другими keyCode отсекаются проверкой выше.
+                if type == .flagsChanged {
+                    let fnDown = event.flags.contains(.maskSecondaryFn)
+                    if fnDown {
+                        if !ctx.isPressed {
+                            ctx.isPressed = true
+                            DispatchQueue.main.async {
+                                ctx.monitor?.isHotkeyPressed = true
+                                ctx.monitor?.eventContinuation?.yield(.pressed)
+                                ctx.monitor?.onHotkeyPress?()
+                                LogManager.keyboard.info("Горячая клавиша (fn) нажата")
+                            }
+                        }
+                    } else if ctx.isPressed {
+                        ctx.isPressed = false
+                        DispatchQueue.main.async {
+                            ctx.monitor?.isHotkeyPressed = false
+                            ctx.monitor?.eventContinuation?.yield(.released)
+                            ctx.monitor?.onHotkeyRelease?()
+                            LogManager.keyboard.info("Горячая клавиша (fn) отпущена")
+                        }
+                    }
+                    return Unmanaged.passRetained(event) // не поглощаем fn (см. System Settings → 🌐 → Do Nothing)
+                }
+
                 // Обрабатываем press/release
                 if type == .keyDown {
                     if !ctx.isPressed {

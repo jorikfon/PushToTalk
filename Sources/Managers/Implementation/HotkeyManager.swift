@@ -41,6 +41,10 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
         105, 107, 113, 106, 64, 79, 80                           // F13-F19
     ]
 
+    /// Код клавиши fn / 🌐 (Globe). Разрешена без модификаторов, как F-клавиши.
+    /// Особенность: приходит как flagsChanged (.maskSecondaryFn), а не keyDown/keyUp.
+    public static let fnKeyCode: CGKeyCode = 63
+
     // MARK: - Computed Properties (Protocol)
 
     public var currentKeyCode: CGKeyCode {
@@ -102,6 +106,9 @@ public class HotkeyManager: HotkeyManagerProtocol, ObservableObject {
 
         // F-клавиши разрешены без модификаторов
         if HotkeyManager.functionKeyCodes.contains(hotkey.keyCode) { return true }
+
+        // fn / 🌐 разрешена без модификаторов (как F-клавиши)
+        if hotkey.keyCode == HotkeyManager.fnKeyCode { return true }
 
         // Regular keys (буквы, цифры, символы) — ОБЯЗАТЕЛЕН модификатор ⌘/⌥/⌃
         // Только ⇧ не считается — Shift+A это просто заглавная буква
@@ -262,6 +269,7 @@ public extension CGKeyCode {
         case 64: return "F17"
         case 79: return "F18"
         case 80: return "F19"
+        case 63: return "fn"
 
         // Letters
         case 0: return "A"
