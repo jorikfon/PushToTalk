@@ -81,16 +81,32 @@ public class WhisperService: WhisperServiceProtocol {
         )
 
         do {
-            // Инициализация WhisperKit с указанной моделью
-            // Модель будет загружена автоматически с Hugging Face
-            whisperKit = try await WhisperKit(
-                model: modelSize,
-                downloadBase: downloadBase,
-                computeOptions: computeOptions,
-                verbose: true,
-                logLevel: .debug,
-                prewarm: true  // Предварительный прогрев модели для быстрого первого запуска
-            )
+            if AppConstants.CustomModels.isCustom(modelSize) {
+                // Кастомная модель с "плоской" структурой репозитория: открываем
+                // напрямую из локальной папки через modelFolder. Веса должны быть
+                // заранее скачаны ModelManager'ом (HuggingFaceModelDownloader).
+                // Токенизатор WhisperKit определит и догрузит сам (вариант large-v3).
+                let folder = AppConstants.CustomModels.folder(for: modelSize)
+                LogManager.transcription.info("Загрузка кастомной модели из папки: \(folder.path)")
+                whisperKit = try await WhisperKit(
+                    modelFolder: folder.path,
+                    computeOptions: computeOptions,
+                    verbose: true,
+                    logLevel: .debug,
+                    prewarm: true
+                )
+            } else {
+                // Инициализация WhisperKit с указанной моделью
+                // Модель будет загружена автоматически с Hugging Face
+                whisperKit = try await WhisperKit(
+                    model: modelSize,
+                    downloadBase: downloadBase,
+                    computeOptions: computeOptions,
+                    verbose: true,
+                    logLevel: .debug,
+                    prewarm: true  // Предварительный прогрев модели для быстрого первого запуска
+                )
+            }
 
             LogManager.transcription.success("Модель загружена", details: modelSize)
 

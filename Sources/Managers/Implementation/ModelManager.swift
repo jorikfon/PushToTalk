@@ -39,7 +39,10 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
         WhisperModel(name: "small", displayName: "Small", size: "~250 MB", speed: "Fast", accuracy: "Good"),
         WhisperModel(name: "medium", displayName: "Medium", size: "~770 MB", speed: "Medium", accuracy: "Better"),
         WhisperModel(name: "large-v2", displayName: "Large V2", size: "~3 GB", speed: "Slower", accuracy: "Excellent"),
-        WhisperModel(name: "large-v3", displayName: "Large V3", size: "~3 GB", speed: "Slower", accuracy: "Best")
+        WhisperModel(name: "large-v3", displayName: "Large V3", size: "~3 GB", speed: "Slower", accuracy: "Best"),
+        // Кастомная модель Hugging Face (large-v3-turbo, дообучен на русский).
+        // Загружается через modelFolder:, см. AppConstants.CustomModels.
+        WhisperModel(name: AppConstants.CustomModels.podlodkaName, displayName: "Podlodka Turbo (RU)", size: "~1.6 GB", speed: "Medium", accuracy: "Best (RU)")
     ]
 
     // MARK: - Private Properties
@@ -105,6 +108,12 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
 
     /// Проверка доступности модели через WhisperKit
     public func checkModelAvailability(_ modelName: String) async -> Bool {
+        // Кастомные модели проверяем по наличию файлов в локальной папке
+        // (через WhisperKit их не проверить — у них плоская структура репозитория).
+        if AppConstants.CustomModels.isCustom(modelName) {
+            return isCustomModelDownloaded(modelName)
+        }
+
         do {
             let _ = try await WhisperKit(
                 model: modelName,
@@ -121,6 +130,12 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
 
     /// Загрузка модели
     public func downloadModel(_ modelName: String) async throws {
+        // Кастомные модели скачиваем напрямую из Hugging Face (с реальным прогрессом).
+        if AppConstants.CustomModels.isCustom(modelName) {
+            try await downloadCustomModel(modelName)
+            return
+        }
+
         await MainActor.run {
             isDownloading = true
             downloadingModel = modelName
@@ -177,6 +192,19 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
     public func deleteModel(_ modelName: String) async throws {
         print("ModelManager: Удаление модели \(modelName)...")
 
+        // Кастомные модели хранятся в собственной папке — удаляем её целиком.
+        if AppConstants.CustomModels.isCustom(modelName) {
+            await MainActor.run {
+                self.downloadedModels.removeAll { $0 == modelName }
+            }
+            if currentModel == modelName {
+                saveCurrentModel("small")
+            }
+            try? FileManager.default.removeItem(at: AppConstants.CustomModels.folder(for: modelName))
+            print("ModelManager: ✓ Кастомная модель \(modelName) удалена")
+            return
+        }
+
         await MainActor.run {
             self.downloadedModels.removeAll { $0 == modelName }
             print("ModelManager: ✓ Модель \(modelName) удалена из списка")
@@ -212,6 +240,65 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
     private func loadCurrentModel() {
         if let saved = UserDefaults.standard.string(forKey: userDefaultsKey) {
             currentModel = saved
+        }
+    }
+
+    // MARK: - Custom Models
+
+    /// Проверка, что кастомная модель полностью скачана (по обязательным файлам).
+    private func isCustomModelDownloaded(_ modelName: String) -> Bool {
+        let folder = AppConstants.CustomModels.folder(for: modelName)
+        let fm = FileManager.default
+        for entry in AppConstants.CustomModels.requiredEntries {
+            if !fm.fileExists(atPath: folder.appendingPathComponent(entry).path) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Скачивание кастомной модели из Hugging Face с реальным прогрессом.
+    private func downloadCustomModel(_ modelName: String) async throws {
+        guard let repo = AppConstants.CustomModels.repo(for: modelName) else {
+            throw ModelError.modelNotFound
+        }
+
+        await MainActor.run {
+            isDownloading = true
+            downloadingModel = modelName
+            downloadProgress = 0.0
+            downloadError = nil
+        }
+
+        LogManager.app.begin("Загрузка кастомной модели", details: "\(modelName) из \(repo)")
+
+        do {
+            let downloader = HuggingFaceModelDownloader(repo: repo)
+            let destination = AppConstants.CustomModels.folder(for: modelName)
+
+            try await downloader.download(to: destination) { progress in
+                Task { @MainActor in
+                    self.downloadProgress = progress
+                }
+            }
+
+            await MainActor.run {
+                isDownloading = false
+                downloadingModel = nil
+                downloadProgress = 1.0
+            }
+
+            scanDownloadedModels()
+            LogManager.app.success("Кастомная модель \(modelName) успешно загружена")
+        } catch {
+            await MainActor.run {
+                isDownloading = false
+                downloadingModel = nil
+                downloadProgress = 0.0
+                downloadError = "Failed to download \(modelName): \(error.localizedDescription)"
+            }
+            LogManager.app.failure("Загрузка кастомной модели", error: error)
+            throw ModelError.downloadFailed(error)
         }
     }
 

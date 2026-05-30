@@ -232,7 +232,26 @@ public final class AppCoordinator {
     private func loadWhisperModel() async {
         do {
             LogManager.app.begin("Загрузка Whisper модели")
-            try await container.whisperService.loadModel()
+
+            // Учитываем сохранённый выбор пользователя: WhisperService по умолчанию
+            // создаётся с моделью "small", поэтому при старте синхронизируем его с
+            // моделью из настроек (иначе после перезапуска всегда грузилась бы small).
+            var modelToLoad = container.modelManager.currentModel
+
+            // Кастомная модель должна быть заранее скачана. Если файлов нет —
+            // откатываемся на small, чтобы не падать на старте.
+            if AppConstants.CustomModels.isCustom(modelToLoad),
+               await !container.modelManager.checkModelAvailability(modelToLoad) {
+                LogManager.app.info("Кастомная модель \(modelToLoad) не скачана — загружаем small")
+                modelToLoad = "small"
+                container.modelManager.saveCurrentModel("small")
+            }
+
+            if container.whisperService.currentModelSize != modelToLoad {
+                try await container.whisperService.reloadModel(newModelSize: modelToLoad)
+            } else {
+                try await container.whisperService.loadModel()
+            }
 
             // Загрузка промпта из настроек
             let userSettings = container.userSettings
