@@ -217,6 +217,7 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
         audioBuffer.removeAll()
         lastChunkProcessedAt = 0
         wasSpeaking = false
+        recordingEpoch += 1   // новый аудио-сегмент → чанки прежнего отбрасываются потребителем
         bufferLock.unlock()
 
         LogManager.audio.success("Буфер очищен", details: "Запись начата с начала")

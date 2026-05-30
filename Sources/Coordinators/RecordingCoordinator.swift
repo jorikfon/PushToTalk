@@ -262,6 +262,14 @@ public final class RecordingCoordinator {
 
         await MainActor.run {
             guard session == self.recordingSession else { return }  // запись сменилась
+            // Стоп-слово отбрасывает накопленное аудио. Инвалидируем уже идущие и
+            // очередные превью: новый session отбросит результат in-flight чанка, а
+            // clearBuffer() бьёт recordingEpoch → очередные чанки прежнего сегмента
+            // тоже отбрасываются. Иначе их текст мог бы быть переиспользован на отпускании.
+            recordingSession += 1
+            inFlightChunkTask?.cancel()
+            inFlightChunkTask = nil
+            inFlightSnapshotCount = 0
             // Сброс буфера и состояния
             audioService.clearBuffer()
             partialTranscriptionText = ""
