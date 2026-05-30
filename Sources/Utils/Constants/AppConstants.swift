@@ -143,6 +143,43 @@ public enum AppConstants {
         return appSupport.appendingPathComponent("PushToTalk/Models", isDirectory: true)
     }()
 
+    // MARK: - Custom Models (Hugging Face, плоская структура репозитория)
+
+    /// Кастомные модели WhisperKit, которые скачиваются из сторонних репозиториев
+    /// Hugging Face с "плоской" структурой (`.mlmodelc` в корне репозитория) и
+    /// загружаются в WhisperKit через `modelFolder:`, а не штатным `model:`.
+    public enum CustomModels {
+        /// Внутренний идентификатор модели Podlodka Turbo (RU).
+        /// Дообученный `whisper-large-v3-turbo` для русского языка (bond005/whisper-podlodka-turbo).
+        public static let podlodkaName = "podlodka-turbo"
+
+        /// Репозиторий Hugging Face с CoreML-весами (плоская структура).
+        public static let podlodkaRepo = "smkrv/whisper-podlodka-turbo-coreml"
+
+        /// Файлы/папки, наличие которых означает, что модель полностью скачана.
+        public static let requiredEntries = [
+            "AudioEncoder.mlmodelc",
+            "TextDecoder.mlmodelc",
+            "MelSpectrogram.mlmodelc",
+            "config.json"
+        ]
+
+        /// Локальная папка с файлами кастомной модели.
+        public static func folder(for name: String = podlodkaName, in base: URL = modelStorageDirectory) -> URL {
+            base.appendingPathComponent("custom/\(name)", isDirectory: true)
+        }
+
+        /// Репозиторий Hugging Face для заданного идентификатора кастомной модели.
+        public static func repo(for name: String) -> String? {
+            name == podlodkaName ? podlodkaRepo : nil
+        }
+
+        /// Является ли модель кастомной (загружается через `modelFolder:`).
+        public static func isCustom(_ name: String) -> Bool {
+            name == podlodkaName
+        }
+    }
+
     // MARK: - Performance
 
     /// Таймаут для загрузки модели (секунды)
