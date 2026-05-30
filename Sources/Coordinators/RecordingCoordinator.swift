@@ -170,6 +170,11 @@ public final class RecordingCoordinator {
         // Показ состояния обработки
         showProcessingState()
 
+        // Сессия завершаемой записи. Фиксируем синхронно здесь (события hotkey
+        // сериализованы), чтобы быстрый рестарт во время await не подсунул в reuse
+        // превью уже НОВОЙ записи.
+        let finalizingSession = recordingSession
+
         // Асинхронная транскрипция
         Task {
             // Гарантированное восстановление аудио окружения даже при ошибках
@@ -179,7 +184,7 @@ public final class RecordingCoordinator {
                 }
             }
 
-            await performTranscription(audioData: audioData)
+            await performTranscription(audioData: audioData, finalizingSession: finalizingSession)
         }
     }
 
@@ -358,7 +363,7 @@ public final class RecordingCoordinator {
     // MARK: - Private Methods - Transcription
 
     /// Выполнение финальной транскрипции и вставка текста
-    private func performTranscription(audioData: [Float]) async {
+    private func performTranscription(audioData: [Float], finalizingSession: Int) async {
         let startTime = Date()
 
         // Проверка на тишину
@@ -373,6 +378,8 @@ public final class RecordingCoordinator {
         //  • если хвост ПОСЛЕ будущего покрытия превью содержит речь, готовый текст
         //    всё равно не покроет конец фразы — ждать его бессмысленно (двойная задержка).
         let plan = await MainActor.run { () -> (task: Task<Void, Never>?, coverage: Int)? in
+            // Запись успели сменить (быстрый рестарт) — превью уже не наше.
+            guard finalizingSession == self.recordingSession else { return nil }
             guard !self.userSettings.useQualityEnhancement else { return nil }
             return (self.inFlightChunkTask, max(self.lastTranscribedSampleCount, self.inFlightSnapshotCount))
         }
@@ -385,7 +392,7 @@ public final class RecordingCoordinator {
             // (оконная проверка: одиночное среднее RMS спрятало бы короткое слово).
             if silenceDetector.isContinuousSilence(tail, rmsThreshold: silenceDetector.rmsThreshold) {
                 await plan.task?.value
-                reusedText = await reusablePartialTranscription(for: audioData)
+                reusedText = await reusablePartialTranscription(for: audioData, session: finalizingSession)
             }
         }
 
@@ -434,7 +441,10 @@ public final class RecordingCoordinator {
     /// Возвращает текст, только если хвост аудио после последней транскрипции —
     /// тишина (иначе мы потеряли бы последние слова, сказанные перед отпусканием).
     @MainActor
-    private func reusablePartialTranscription(for audioData: [Float]) -> String? {
+    private func reusablePartialTranscription(for audioData: [Float], session: Int) -> String? {
+        // Превью принадлежит финализируемой записи? Иначе (рестарт во время await)
+        // partialTranscriptionText — уже от новой записи, переиспользовать нельзя.
+        guard session == recordingSession else { return nil }
         guard !partialTranscriptionText.isEmpty else { return nil }
         let start = min(lastTranscribedSampleCount, audioData.count)
         let tail = Array(audioData[start...])
