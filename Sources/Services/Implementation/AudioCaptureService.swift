@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import CoreAudio
+import Accelerate
 
 /// Сервис для захвата аудио с микрофона
 /// Использует AVAudioEngine для низколатентной записи в формате 16kHz mono
@@ -34,8 +35,23 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
 
     // MARK: - Private Properties
 
-    private let chunkDurationSeconds: Float = 2.0  // Размер чанка в секундах
+    /// Интервал "safety net" для периодической выдачи чанка, если речь идёт без пауз.
+    /// Основной триггер превью — детекция паузы (speech→silence), см. detectPauseAndEmit.
+    private let chunkDurationSeconds: Float = 4.0
     private var lastChunkProcessedAt: Int = 0  // Количество сэмплов на момент последней обработки
+
+    // MARK: - Pause detection (speech→silence) для раннего запуска транскрипции
+
+    /// Длина хвостового окна для оценки тишины (секунды)
+    private let pauseWindowSeconds: Float = 0.4
+    /// RMS, выше которого считаем, что идёт речь (вход в состояние "говорит")
+    private let speechRMSThreshold: Float = 0.01
+    /// RMS, ниже которого считаем тишиной (выход → пауза); гистерезис относительно speech
+    private let silenceRMSThreshold: Float = 0.004
+    /// Минимум новых сэмплов между выдачами чанка, чтобы не спамить (0.5с)
+    private let minSamplesBetweenEmits: Int = 8000
+    /// Был ли зафиксирован факт речи (для детекции перехода речь→тишина)
+    private var wasSpeaking = false
 
     /// Continuation для AsyncStream аудио чанков
     private var chunkContinuation: AsyncStream<[Float]>.Continuation?
@@ -97,6 +113,7 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
 
         audioBuffer.removeAll()
         lastChunkProcessedAt = 0  // Сброс счетчика чанков
+        wasSpeaking = false       // Сброс детектора паузы
         LogManager.audio.debug("Буфер очищен")
 
         let inputNode = audioEngine.inputNode
@@ -192,6 +209,7 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
         bufferLock.lock()
         audioBuffer.removeAll()
         lastChunkProcessedAt = 0
+        wasSpeaking = false
         bufferLock.unlock()
 
         LogManager.audio.success("Буфер очищен", details: "Запись начата с начала")
@@ -247,31 +265,69 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
         checkAndProcessChunk(currentBufferSize: newCount)
     }
 
-    /// Проверяет накопленное аудио и вызывает callback для обработки чанка
-    /// ВАЖНО: Отправляет ВСЁ накопленное аудио с начала записи (кумулятивный подход)
+    /// Проверяет накопленное аудио и решает, когда выдать чанк на транскрипцию.
+    /// Приоритет — детекция паузы (speech→silence): транскрипция стартует в момент,
+    /// когда пользователь замолчал, чтобы успеть к отпусканию hotkey (overlap+reuse).
+    /// Периодическая выдача каждые `chunkDurationSeconds` — лишь safety net для
+    /// длинной речи без пауз.
     private func checkAndProcessChunk(currentBufferSize: Int) {
-        let chunkSizeInSamples = Int(chunkDurationSeconds * 16000)  // 2 сек * 16000 Hz = 32000 сэмплов
+        // 1. Быстрый путь: конец речи (пауза)
+        detectPauseAndEmit(currentBufferSize: currentBufferSize)
+
+        // 2. Safety net: давно не выдавали — выдадим по интервалу
+        let chunkSizeInSamples = Int(chunkDurationSeconds * 16000)
         let samplesAccumulated = currentBufferSize - lastChunkProcessedAt
-
-        // Если накопили достаточно для следующего интервала
         if samplesAccumulated >= chunkSizeInSamples {
-            bufferLock.lock()
-            // КУМУЛЯТИВНЫЙ ПОДХОД: Копируем ВСЁ аудио от начала до текущей позиции
-            // Это даёт модели больше контекста и улучшает точность распознавания
-            let cumulativeChunk = Array(audioBuffer[0..<currentBufferSize])
-            lastChunkProcessedAt = currentBufferSize
-            bufferLock.unlock()
+            emitCumulativeChunk(currentBufferSize: currentBufferSize, reason: "interval")
+        }
+    }
 
-            let chunkDuration = Float(cumulativeChunk.count) / 16000.0
-            LogManager.audio.info("Кумулятивный чанк готов: \(cumulativeChunk.count) сэмплов (\(String(format: "%.2f", chunkDuration))s)")
+    /// Детекция перехода речь→тишина по хвостовому окну RMS (вызывается ~каждые
+    /// ~256мс из tap-колбэка). При обнаружении паузы выдаёт кумулятивный буфер,
+    /// чтобы транскрипция началась немедленно, а не на границе периодического чанка.
+    private func detectPauseAndEmit(currentBufferSize: Int) {
+        let windowSize = Int(pauseWindowSeconds * 16000)
+        guard currentBufferSize >= windowSize else { return }
 
-            // Отправляем в AsyncStream
-            chunkContinuation?.yield(cumulativeChunk)
+        bufferLock.lock()
+        let tail = Array(audioBuffer[(currentBufferSize - windowSize)..<currentBufferSize])
+        bufferLock.unlock()
 
-            // Вызываем deprecated callback на главном потоке для backwards compatibility
-            DispatchQueue.main.async { [weak self] in
-                self?.onAudioChunkReady?(cumulativeChunk)
-            }
+        var rms: Float = 0
+        vDSP_rmsqv(tail, 1, &rms, vDSP_Length(tail.count))
+
+        // Громко → запоминаем, что речь была
+        if rms > speechRMSThreshold {
+            wasSpeaking = true
+            return
+        }
+
+        // Тихо после речи → пауза: запускаем транскрипцию накопленного
+        if wasSpeaking && rms < silenceRMSThreshold {
+            let samplesSinceLast = currentBufferSize - lastChunkProcessedAt
+            guard samplesSinceLast >= minSamplesBetweenEmits else { return }
+            wasSpeaking = false
+            emitCumulativeChunk(currentBufferSize: currentBufferSize, reason: "pause")
+        }
+    }
+
+    /// Выдаёт ВЕСЬ накопленный буфер (кумулятивный подход — модель видит полный
+    /// контекст, качество не страдает) в AsyncStream и deprecated-callback.
+    private func emitCumulativeChunk(currentBufferSize: Int, reason: String) {
+        bufferLock.lock()
+        let cumulativeChunk = Array(audioBuffer[0..<currentBufferSize])
+        lastChunkProcessedAt = currentBufferSize
+        bufferLock.unlock()
+
+        let chunkDuration = Float(cumulativeChunk.count) / 16000.0
+        LogManager.audio.info("Кумулятивный чанк [\(reason)]: \(cumulativeChunk.count) сэмплов (\(String(format: "%.2f", chunkDuration))s)")
+
+        // Отправляем в AsyncStream
+        chunkContinuation?.yield(cumulativeChunk)
+
+        // Вызываем deprecated callback на главном потоке для backwards compatibility
+        DispatchQueue.main.async { [weak self] in
+            self?.onAudioChunkReady?(cumulativeChunk)
         }
     }
 

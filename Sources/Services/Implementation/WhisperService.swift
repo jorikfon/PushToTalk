@@ -29,6 +29,14 @@ public class WhisperService: WhisperServiceProtocol {
         return modelSize
     }
 
+    /// Краткое описание задействованного ускорителя для UI.
+    /// Отражает запрошенную конфигурацию ModelComputeOptions (Mel=GPU,
+    /// Encoder/Decoder/Prefill=ANE) и имя устройства Metal.
+    public var accelerationSummary: String {
+        let device = MTLCreateSystemDefaultDevice()?.name ?? "CPU"
+        return "Neural Engine + GPU · \(device)"
+    }
+
     public init(
         modelSize: String = "small",
         downloadBase: URL = AppConstants.modelStorageDirectory,

@@ -88,6 +88,22 @@ public class FloatingRecordingWindow: NSWindow {
         }
     }
 
+    /// Обновить бейдж движка (какой ускоритель задействован) и скорость последней
+    /// транскрипции. Показывается во время записи, чтобы было наглядно и честно.
+    public func updateEngineInfo(engine: String, averageRTF: Double, lastTime: TimeInterval) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            self.viewModel.engineInfo = engine
+            if averageRTF > 0 {
+                let speed = 1.0 / averageRTF  // во сколько раз быстрее реального времени
+                self.viewModel.speedInfo = String(format: "⚡︎ %.1f× realtime · %d мс", speed, Int(lastTime * 1000))
+            } else {
+                self.viewModel.speedInfo = ""
+            }
+        }
+    }
+
     /// Обновить на состояние транскрипции (вызывает анимацию трансформации)
     public func showProcessing() {
         // Вызываем анимацию трансформации в компактный режим
@@ -194,6 +210,8 @@ class RecordingViewModel: ObservableObject {
     @Published var pulseAnimation = false
     @Published var audioDeviceName: String = ""
     @Published var remainingTime: TimeInterval = 60.0  // Оставшееся время
+    @Published var engineInfo: String = ""             // Движок ускорения (ANE/GPU/устройство)
+    @Published var speedInfo: String = ""              // Скорость последней транскрипции (RTF)
 
     private var startTime: Date?
     private var maxDuration: TimeInterval = 60.0
@@ -465,6 +483,26 @@ struct RecordingStatusView: View {
                 }
             }
             .padding(.bottom, 4)
+
+            // Бейдж движка: какой ускоритель задействован + скорость (наглядно и честно)
+            if !viewModel.engineInfo.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.7))
+                    Text(viewModel.engineInfo)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .lineLimit(1)
+                    if !viewModel.speedInfo.isEmpty {
+                        Text(viewModel.speedInfo)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.green.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+            }
 
             // Чистый текст без рамок и блоков
             ScrollView {

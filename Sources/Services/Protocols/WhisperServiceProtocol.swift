@@ -23,6 +23,10 @@ public protocol WhisperServiceProtocol {
     /// Средний Real-Time Factor (RTF < 1.0 = быстрее реального времени)
     var averageRTF: Double { get }
 
+    /// Краткое описание задействованного ускорителя для UI
+    /// (например, "Neural Engine + GPU · Apple M2 Max")
+    var accelerationSummary: String { get }
+
     // MARK: - Model Management
 
     /// Загрузка модели Whisper
@@ -67,4 +71,7 @@ public extension WhisperServiceProtocol {
     func transcribe(audioSamples: [Float]) async throws -> String {
         return try await transcribe(audioSamples: audioSamples, contextPrompt: nil)
     }
+
+    /// Дефолт, чтобы существующие моки не ломались
+    var accelerationSummary: String { "On-device" }
 }

@@ -41,6 +41,28 @@ public final class RecordingCoordinator {
     /// Флаг для предотвращения параллельных транскрипций чанков
     private var isTranscribingChunk = false
 
+    /// Сколько сэмплов уже покрыто последней транскрипцией превью.
+    /// Используется на отпускании, чтобы решить: переиспользовать готовый
+    /// результат (если хвост — тишина) или сделать финальный проход.
+    private var lastTranscribedSampleCount: Int = 0
+
+    /// Спекулятивная транскрипция, запущенная по паузе. На отпускании мы её
+    /// ДОЖИДАЕМСЯ (overlap+reuse), а не выбрасываем и запускаем заново.
+    private var inFlightChunkTask: Task<Void, Never>?
+
+    /// Сколько сэмплов покроет текущая (ещё идущая) транскрипция превью.
+    /// На отпускании по нему решаем, имеет ли смысл ждать превью или сразу
+    /// делать финальный проход (если хвост после снапшота — речь).
+    private var inFlightSnapshotCount: Int = 0
+
+    /// Порог RMS, ниже которого хвост после превью считаем тишиной (reuse).
+    /// Совпадает с порогом тишины детектора пауз в AudioCaptureService.
+    private static let reuseTailSilenceRMS: Float = 0.004
+
+    /// Инструментация: сколько раз переиспользовали превью vs делали финальный проход
+    private var reuseHitCount = 0
+    private var finalPassCount = 0
+
     /// Таймер для автоматической остановки записи
     private var recordingTimer: Timer?
 
@@ -160,30 +182,36 @@ public final class RecordingCoordinator {
         }
     }
 
-    /// Обработка аудио чанка для real-time транскрипции
-    /// ВАЖНО: chunk содержит ВСЁ накопленное аудио с начала записи (кумулятивный подход)
+    /// Обработка аудио чанка для real-time транскрипции.
+    /// ВАЖНО: chunk содержит ВСЁ накопленное аудио с начала записи (кумулятивный
+    /// подход — модель видит полный контекст, качество не страдает).
+    /// Общее изменяемое состояние трогаем только на MainActor — на отпускании
+    /// решение о переиспользовании читает то же состояние и не должно ловить гонку.
     public func handleAudioChunk(_ chunk: [Float]) {
-        // Пропускаем если уже идет обработка предыдущего чанка
-        guard !isTranscribingChunk else {
-            return
-        }
+        Task { @MainActor in
+            // Пропускаем если уже идет обработка предыдущего чанка
+            guard !self.isTranscribingChunk else { return }
 
-        isTranscribingChunk = true
-        let chunkDuration = Float(chunk.count) / Float(AppConstants.Audio.whisperSampleRate)
+            self.isTranscribingChunk = true
+            let snapshotCount = chunk.count
+            self.inFlightSnapshotCount = snapshotCount
+            let chunkDuration = Float(chunk.count) / Float(AppConstants.Audio.whisperSampleRate)
 
-        Task {
-            do {
-                // Быстрая транскрипция ВСЕГО накопленного аудио
-                let fullText = try await whisperService.transcribeChunk(audioSamples: chunk)
+            self.inFlightChunkTask = Task { [weak self] in
+                guard let self = self else { return }
+                do {
+                    // Быстрая транскрипция ВСЕГО накопленного аудио
+                    let fullText = try await self.whisperService.transcribeChunk(audioSamples: chunk)
 
-                if !fullText.isEmpty {
-                    await handleTranscribedChunk(fullText, duration: chunkDuration)
+                    if !fullText.isEmpty {
+                        await self.handleTranscribedChunk(fullText, duration: chunkDuration, snapshotCount: snapshotCount)
+                    }
+                } catch {
+                    LogManager.app.error("Ошибка транскрипции чанка: \(error.localizedDescription)")
                 }
-            } catch {
-                LogManager.app.error("Ошибка транскрипции чанка: \(error.localizedDescription)")
-            }
 
-            isTranscribingChunk = false
+                await MainActor.run { self.isTranscribingChunk = false }
+            }
         }
     }
 
@@ -193,16 +221,21 @@ public final class RecordingCoordinator {
     private func resetState() {
         partialTranscriptionText = ""
         isTranscribingChunk = false
+        lastTranscribedSampleCount = 0
+        inFlightSnapshotCount = 0
+        inFlightChunkTask?.cancel()
+        inFlightChunkTask = nil
         audioService.clearBuffer()
     }
 
     /// Обработка транскрибированного чанка
-    private func handleTranscribedChunk(_ text: String, duration: Float) async {
+    /// - Parameter snapshotCount: сколько сэмплов покрывает этот результат
+    private func handleTranscribedChunk(_ text: String, duration: Float, snapshotCount: Int) async {
         // Проверка на стоп-слова
         if userSettings.containsStopWord(text) {
             await handleStopWordDetected()
         } else {
-            await updatePartialTranscription(text, duration: duration)
+            await updatePartialTranscription(text, duration: duration, snapshotCount: snapshotCount)
         }
     }
 
@@ -214,6 +247,7 @@ public final class RecordingCoordinator {
             // Сброс буфера и состояния
             audioService.clearBuffer()
             partialTranscriptionText = ""
+            lastTranscribedSampleCount = 0
             floatingWindow.updatePartialTranscription("")
             floatingWindow.resetTimer()
 
@@ -222,11 +256,15 @@ public final class RecordingCoordinator {
         }
     }
 
-    /// Обновление частичной транскрипции в UI
-    private func updatePartialTranscription(_ text: String, duration: Float) async {
+    /// Обновление частичной транскрипции в UI.
+    /// partialTranscriptionText и lastTranscribedSampleCount пишутся ВМЕСТЕ на
+    /// MainActor — чтобы решение о переиспользовании на отпускании видело
+    /// согласованную пару (текст ↔ сколько сэмплов он покрывает).
+    private func updatePartialTranscription(_ text: String, duration: Float, snapshotCount: Int) async {
         await MainActor.run {
             // ЗАМЕНЯЕМ текст полностью (не накапливаем!), т.к. транскрибируем всё аудио заново
             partialTranscriptionText = text
+            lastTranscribedSampleCount = snapshotCount
             floatingWindow.updatePartialTranscription(text)
 
             LogManager.app.info("Кумулятивная транскрипция (\(String(format: "%.1f", duration))s): \"\(text)\"")
@@ -262,6 +300,13 @@ public final class RecordingCoordinator {
             // Показ floating window с таймером
             let maxDuration = userSettings.maxRecordingDuration
             floatingWindow.showRecording(maxDuration: maxDuration)
+
+            // Бейдж движка: какой ускоритель задействован + скорость прошлой транскрипции
+            floatingWindow.updateEngineInfo(
+                engine: whisperService.accelerationSummary,
+                averageRTF: whisperService.averageRTF,
+                lastTime: whisperService.lastTranscriptionTime
+            )
 
             // Звуковые эффекты
             soundManager.play(.recordingStarted)
@@ -299,28 +344,81 @@ public final class RecordingCoordinator {
             return
         }
 
-        do {
-            LogManager.transcription.begin("Транскрипция")
+        // Решаем ДО ожидания, имеет ли смысл ждать спекулятивное превью:
+        //  • в режиме повышения качества превью (быстрый greedy) использовать нельзя —
+        //    нужен финальный проход с beam/threshold-настройками;
+        //  • если хвост ПОСЛЕ будущего покрытия превью содержит речь, готовый текст
+        //    всё равно не покроет конец фразы — ждать его бессмысленно (двойная задержка).
+        let plan = await MainActor.run { () -> (task: Task<Void, Never>?, coverage: Int)? in
+            guard !self.userSettings.useQualityEnhancement else { return nil }
+            return (self.inFlightChunkTask, max(self.lastTranscribedSampleCount, self.inFlightSnapshotCount))
+        }
 
-            // Транскрипция через Whisper
-            let transcription = try await whisperService.transcribe(audioSamples: audioData)
-            let duration = Date().timeIntervalSince(startTime)
+        var reusedText: String? = nil
+        if let plan = plan {
+            let coverageStart = min(plan.coverage, audioData.count)
+            let tail = Array(audioData[coverageStart...])
+            // Ждём in-flight, только если хвост после его снапшота — тишина по энергии.
+            if tail.isEmpty || silenceDetector.energyRMS(tail) < Self.reuseTailSilenceRMS {
+                await plan.task?.value
+                reusedText = await reusablePartialTranscription(for: audioData)
+            }
+        }
 
-            // Проверка на стоп-слова
-            if userSettings.containsStopWord(transcription) {
-                await handleStopWordInTranscription()
+        let transcription: String
+        if let cached = reusedText {
+            // Хвост после последней транскрипции — тишина: готовый результат покрывает
+            // всю речь, финальный проход не нужен.
+            transcription = cached
+            await MainActor.run { self.reuseHitCount += 1 }
+            LogManager.transcription.success(
+                "♻️ Переиспользуем превью (хвост = тишина), финальный проход пропущен",
+                details: "reuse=\(reuseHitCount) final=\(finalPassCount)"
+            )
+        } else {
+            do {
+                await MainActor.run { self.finalPassCount += 1 }
+                LogManager.transcription.begin("Финальная транскрипция", details: "reuse=\(reuseHitCount) final=\(finalPassCount)")
+                transcription = try await whisperService.transcribe(audioSamples: audioData)
+            } catch {
+                await handleTranscriptionError(error)
                 return
             }
-
-            // Обработка результата
-            if !transcription.isEmpty {
-                await handleSuccessfulTranscription(transcription, duration: duration)
-            } else {
-                await handleEmptyTranscription()
-            }
-        } catch {
-            await handleTranscriptionError(error)
         }
+
+        let duration = Date().timeIntervalSince(startTime)
+        let audioDuration = Double(audioData.count) / 16000.0
+        LogManager.transcription.debug(
+            "⏱️ post-release latency=\(String(format: "%.2f", duration))s, audio=\(String(format: "%.2f", audioDuration))s, avgRTF=\(String(format: "%.2f", whisperService.averageRTF))"
+        )
+
+        // Проверка на стоп-слова
+        if userSettings.containsStopWord(transcription) {
+            await handleStopWordInTranscription()
+            return
+        }
+
+        // Обработка результата
+        if !transcription.isEmpty {
+            await handleSuccessfulTranscription(transcription, duration: duration)
+        } else {
+            await handleEmptyTranscription()
+        }
+    }
+
+    /// Можно ли переиспользовать результат превью вместо финального прохода.
+    /// Возвращает текст, только если хвост аудио после последней транскрипции —
+    /// тишина (иначе мы потеряли бы последние слова, сказанные перед отпусканием).
+    @MainActor
+    private func reusablePartialTranscription(for audioData: [Float]) -> String? {
+        guard !partialTranscriptionText.isEmpty else { return nil }
+        let start = min(lastTranscribedSampleCount, audioData.count)
+        let tail = Array(audioData[start...])
+        // НЕ используем isSilence: он считает любой хвост < 0.3с тишиной
+        // (minSpeechDuration) и мог бы отбросить короткое последнее слово.
+        // Проверяем именно энергию хвоста (пустой хвост → тоже ок).
+        guard tail.isEmpty || silenceDetector.energyRMS(tail) < Self.reuseTailSilenceRMS else { return nil }
+        return partialTranscriptionText
     }
 
     /// Обработка обнаружения тишины

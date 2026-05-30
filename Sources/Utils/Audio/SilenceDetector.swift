@@ -47,6 +47,15 @@ public class SilenceDetector {
         return false
     }
 
+    /// RMS энергии сигнала БЕЗ проверки минимальной длительности.
+    /// Нужно для анализа коротких хвостов: `isSilence` для отрезка < minSpeechDuration
+    /// (0.3с) всегда возвращает true, из-за чего короткое последнее слово было бы
+    /// ошибочно принято за тишину. Пустой массив → 0.
+    public func energyRMS(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        return calculateRMS(samples)
+    }
+
     /// Вычисление RMS (Root Mean Square) для аудио сигнала
     /// - Parameter samples: Массив аудио сэмплов
     /// - Returns: RMS значение
