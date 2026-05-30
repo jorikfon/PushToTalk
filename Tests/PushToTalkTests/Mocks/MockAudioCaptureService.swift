@@ -85,6 +85,7 @@ public final class MockAudioCaptureService: AudioCaptureServiceProtocol, Observa
     public func clearBuffer() {
         clearBufferCallCount += 1
         recordedSamples = []
+        recordingEpoch += 1   // как в проде: clear инвалидирует чанки прежнего сегмента
     }
 
     // MARK: - Test Helpers

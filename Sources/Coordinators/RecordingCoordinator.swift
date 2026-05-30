@@ -60,10 +60,6 @@ public final class RecordingCoordinator {
     /// делать финальный проход (если хвост после снапшота — речь).
     private var inFlightSnapshotCount: Int = 0
 
-    /// Порог RMS, ниже которого хвост после превью считаем тишиной (reuse).
-    /// Совпадает с порогом тишины детектора пауз в AudioCaptureService.
-    private static let reuseTailSilenceRMS: Float = 0.004
-
     /// Инструментация: сколько раз переиспользовали превью vs делали финальный проход
     private var reuseHitCount = 0
     private var finalPassCount = 0
@@ -387,7 +383,7 @@ public final class RecordingCoordinator {
             let tail = Array(audioData[coverageStart...])
             // Ждём in-flight, только если ВЕСЬ хвост после его снапшота — тишина
             // (оконная проверка: одиночное среднее RMS спрятало бы короткое слово).
-            if silenceDetector.isContinuousSilence(tail, rmsThreshold: Self.reuseTailSilenceRMS) {
+            if silenceDetector.isContinuousSilence(tail, rmsThreshold: silenceDetector.rmsThreshold) {
                 await plan.task?.value
                 reusedText = await reusablePartialTranscription(for: audioData)
             }
@@ -444,8 +440,9 @@ public final class RecordingCoordinator {
         let tail = Array(audioData[start...])
         // НЕ используем isSilence: он считает любой хвост < 0.3с тишиной
         // (minSpeechDuration) и мог бы отбросить короткое последнее слово.
-        // Оконная проверка тишины: любое окно с энергией → не переиспользуем.
-        guard silenceDetector.isContinuousSilence(tail, rmsThreshold: Self.reuseTailSilenceRMS) else { return nil }
+        // Оконная проверка тишины тем же порогом, что и финальная детекция речи
+        // (любое окно с энергией → не переиспользуем, чтобы не терять тихие слова).
+        guard silenceDetector.isContinuousSilence(tail, rmsThreshold: silenceDetector.rmsThreshold) else { return nil }
         return partialTranscriptionText
     }
 
