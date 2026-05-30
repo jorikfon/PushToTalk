@@ -14,9 +14,13 @@ public protocol AudioCaptureServiceProtocol: ObservableObject {
 
     // MARK: - AsyncStream API (Modern)
 
+    /// Номер текущей записи (для отбрасывания чанков предыдущей записи)
+    var recordingEpoch: Int { get }
+
     /// Поток real-time аудио чанков (async/await)
-    /// Используйте для асинхронной обработки аудио фрагментов каждые N секунд
-    var audioChunks: AsyncStream<[Float]> { get }
+    /// Используйте для асинхронной обработки аудио фрагментов каждые N секунд.
+    /// Каждый элемент помечен epoch — номером записи, в которой он получен.
+    var audioChunks: AsyncStream<(epoch: Int, samples: [Float])> { get }
 
     // MARK: - Deprecated Callback API
 

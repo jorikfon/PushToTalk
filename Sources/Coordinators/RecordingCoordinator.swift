@@ -192,8 +192,12 @@ public final class RecordingCoordinator {
     /// подход — модель видит полный контекст, качество не страдает).
     /// Общее изменяемое состояние трогаем только на MainActor — на отпускании
     /// решение о переиспользовании читает то же состояние и не должно ловить гонку.
-    public func handleAudioChunk(_ chunk: [Float]) {
+    public func handleAudioChunk(_ chunk: [Float], epoch: Int) {
         Task { @MainActor in
+            // Отбрасываем чанк, эмитированный предыдущей записью (epoch устарел):
+            // его аудио не принадлежит текущей записи и не должно переиспользоваться.
+            guard epoch == self.audioService.recordingEpoch else { return }
+
             // Пропускаем если уже идет обработка предыдущего чанка
             guard !self.isTranscribingChunk else { return }
 

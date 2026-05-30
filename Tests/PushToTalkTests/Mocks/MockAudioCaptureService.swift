@@ -13,12 +13,14 @@ public final class MockAudioCaptureService: AudioCaptureServiceProtocol, Observa
     public var onAudioChunkReady: (([Float]) -> Void)?
 
     // AsyncStream support
-    private var chunkContinuation: AsyncStream<[Float]>.Continuation?
-    public private(set) lazy var audioChunks: AsyncStream<[Float]> = {
+    private var chunkContinuation: AsyncStream<(epoch: Int, samples: [Float])>.Continuation?
+    public private(set) lazy var audioChunks: AsyncStream<(epoch: Int, samples: [Float])> = {
         AsyncStream { continuation in
             self.chunkContinuation = continuation
         }
     }()
+
+    public private(set) var recordingEpoch: Int = 0
 
     // MARK: - Mock Behavior Configuration
 
@@ -58,6 +60,7 @@ public final class MockAudioCaptureService: AudioCaptureServiceProtocol, Observa
 
         isRecording = true
         recordedSamples = []
+        recordingEpoch += 1
 
         // Simulate audio chunk generation if configured
         if shouldSimulateChunks {
@@ -94,8 +97,8 @@ public final class MockAudioCaptureService: AudioCaptureServiceProtocol, Observa
         // Call callback if set
         onAudioChunkReady?(chunk)
 
-        // Send to AsyncStream
-        chunkContinuation?.yield(chunk)
+        // Send to AsyncStream (с меткой записи)
+        chunkContinuation?.yield((epoch: recordingEpoch, samples: chunk))
     }
 
     /// Add samples to the buffer (simulating recording)

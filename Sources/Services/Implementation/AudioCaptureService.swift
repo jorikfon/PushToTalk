@@ -13,10 +13,16 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
     @Published public var isRecording = false
     @Published public var permissionGranted = false
 
+    /// Номер текущей записи. Инкрементируется в startRecording(); проставляется
+    /// каждому выдаваемому чанку, чтобы потребитель мог отбросить чанки,
+    /// эмитированные предыдущей записью, но ещё не вычитанные из AsyncStream.
+    public private(set) var recordingEpoch: Int = 0
+
     // MARK: - AsyncStream API
 
-    /// Поток real-time аудио чанков
-    public var audioChunks: AsyncStream<[Float]> {
+    /// Поток real-time аудио чанков. Каждый элемент помечен epoch — номером
+    /// записи, в которой он был получен (для отбрасывания чанков прошлой записи).
+    public var audioChunks: AsyncStream<(epoch: Int, samples: [Float])> {
         AsyncStream { continuation in
             // Сохраняем continuation для отправки чанков
             self.chunkContinuation = continuation
@@ -54,7 +60,7 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
     private var wasSpeaking = false
 
     /// Continuation для AsyncStream аудио чанков
-    private var chunkContinuation: AsyncStream<[Float]>.Continuation?
+    private var chunkContinuation: AsyncStream<(epoch: Int, samples: [Float])>.Continuation?
 
     // MARK: - Initialization
 
@@ -114,6 +120,7 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
         audioBuffer.removeAll()
         lastChunkProcessedAt = 0  // Сброс счетчика чанков
         wasSpeaking = false       // Сброс детектора паузы
+        recordingEpoch += 1       // Новая запись — метка для отбрасывания старых чанков
         LogManager.audio.debug("Буфер очищен")
 
         let inputNode = audioEngine.inputNode
@@ -287,10 +294,13 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
     /// чтобы транскрипция началась немедленно, а не на границе периодического чанка.
     private func detectPauseAndEmit(currentBufferSize: Int) {
         let windowSize = Int(pauseWindowSeconds * 16000)
-        guard currentBufferSize >= windowSize else { return }
 
+        // Длину берём под локом по факту: буфер мог быть очищен (stop/clearBuffer)
+        // между захватом currentBufferSize и этим моментом — иначе слайс упадёт.
         bufferLock.lock()
-        let tail = Array(audioBuffer[(currentBufferSize - windowSize)..<currentBufferSize])
+        let count = audioBuffer.count
+        guard count >= windowSize else { bufferLock.unlock(); return }
+        let tail = Array(audioBuffer[(count - windowSize)..<count])
         bufferLock.unlock()
 
         var rms: Float = 0
@@ -304,10 +314,10 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
 
         // Тихо после речи → пауза: запускаем транскрипцию накопленного
         if wasSpeaking && rms < silenceRMSThreshold {
-            let samplesSinceLast = currentBufferSize - lastChunkProcessedAt
+            let samplesSinceLast = count - lastChunkProcessedAt
             guard samplesSinceLast >= minSamplesBetweenEmits else { return }
             wasSpeaking = false
-            emitCumulativeChunk(currentBufferSize: currentBufferSize, reason: "pause")
+            emitCumulativeChunk(currentBufferSize: count, reason: "pause")
         }
     }
 
@@ -315,15 +325,19 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
     /// контекст, качество не страдает) в AsyncStream и deprecated-callback.
     private func emitCumulativeChunk(currentBufferSize: Int, reason: String) {
         bufferLock.lock()
-        let cumulativeChunk = Array(audioBuffer[0..<currentBufferSize])
-        lastChunkProcessedAt = currentBufferSize
+        // Кламп по фактической длине: буфер мог быть очищен между вызовами.
+        let count = min(currentBufferSize, audioBuffer.count)
+        guard count > 0 else { bufferLock.unlock(); return }
+        let cumulativeChunk = Array(audioBuffer[0..<count])
+        lastChunkProcessedAt = count
+        let epoch = recordingEpoch
         bufferLock.unlock()
 
         let chunkDuration = Float(cumulativeChunk.count) / 16000.0
         LogManager.audio.info("Кумулятивный чанк [\(reason)]: \(cumulativeChunk.count) сэмплов (\(String(format: "%.2f", chunkDuration))s)")
 
-        // Отправляем в AsyncStream
-        chunkContinuation?.yield(cumulativeChunk)
+        // Отправляем в AsyncStream с меткой записи (epoch)
+        chunkContinuation?.yield((epoch: epoch, samples: cumulativeChunk))
 
         // Вызываем deprecated callback на главном потоке для backwards compatibility
         DispatchQueue.main.async { [weak self] in

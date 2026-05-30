@@ -156,7 +156,7 @@ public final class AppCoordinator {
         // Async/await обработка real-time аудио чанков через AsyncStream
         Task {
             for await chunk in container.audioService.audioChunks {
-                recordingCoordinator.handleAudioChunk(chunk)
+                recordingCoordinator.handleAudioChunk(chunk.samples, epoch: chunk.epoch)
             }
         }
     }
