@@ -50,10 +50,12 @@ public class AudioCaptureService: AudioCaptureServiceProtocol, ObservableObject 
 
     /// Длина хвостового окна для оценки тишины (секунды)
     private let pauseWindowSeconds: Float = 0.4
-    /// RMS, выше которого считаем, что идёт речь (вход в состояние "говорит")
-    private let speechRMSThreshold: Float = 0.01
-    /// RMS, ниже которого считаем тишиной (выход → пауза); гистерезис относительно speech
-    private let silenceRMSThreshold: Float = 0.004
+    /// Порог входа в состояние "речь". Равен порогу речи приложения
+    /// (SilenceDetector.rmsThreshold), чтобы тихая, но валидная речь тоже
+    /// запускала спекулятивное превью, а не ждала 4-сек fallback.
+    private let speechRMSThreshold: Float = SilenceDetector.shared.rmsThreshold
+    /// Порог выхода в "паузу" — чуть ниже порога речи (гистерезис против дребезга).
+    private let silenceRMSThreshold: Float = SilenceDetector.shared.rmsThreshold * 0.75
     /// Минимум новых сэмплов между выдачами чанка, чтобы не спамить (0.5с)
     private let minSamplesBetweenEmits: Int = 8000
     /// Был ли зафиксирован факт речи (для детекции перехода речь→тишина)
