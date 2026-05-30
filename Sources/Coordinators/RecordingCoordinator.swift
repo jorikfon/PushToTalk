@@ -41,6 +41,11 @@ public final class RecordingCoordinator {
     /// Флаг для предотвращения параллельных транскрипций чанков
     private var isTranscribingChunk = false
 
+    /// Идентификатор текущей записи. Инкрементируется при старте новой записи,
+    /// чтобы поздние результаты превью от ПРЕДЫДУЩЕЙ записи (cancel() не
+    /// останавливает уже идущий transcribeChunk) были отброшены, а не вставлены.
+    private var recordingSession: Int = 0
+
     /// Сколько сэмплов уже покрыто последней транскрипцией превью.
     /// Используется на отпускании, чтобы решить: переиспользовать готовый
     /// результат (если хвост — тишина) или сделать финальный проход.
@@ -195,22 +200,29 @@ public final class RecordingCoordinator {
             self.isTranscribingChunk = true
             let snapshotCount = chunk.count
             self.inFlightSnapshotCount = snapshotCount
+            let session = self.recordingSession
             let chunkDuration = Float(chunk.count) / Float(AppConstants.Audio.whisperSampleRate)
 
             self.inFlightChunkTask = Task { [weak self] in
                 guard let self = self else { return }
+                var fullText = ""
                 do {
                     // Быстрая транскрипция ВСЕГО накопленного аудио
-                    let fullText = try await self.whisperService.transcribeChunk(audioSamples: chunk)
-
-                    if !fullText.isEmpty {
-                        await self.handleTranscribedChunk(fullText, duration: chunkDuration, snapshotCount: snapshotCount)
-                    }
+                    fullText = try await self.whisperService.transcribeChunk(audioSamples: chunk)
                 } catch {
                     LogManager.app.error("Ошибка транскрипции чанка: \(error.localizedDescription)")
                 }
 
-                await MainActor.run { self.isTranscribingChunk = false }
+                // Снимаем флаг и публикуем результат ТОЛЬКО если запись не сменилась —
+                // иначе поздний результат старой записи затрёт состояние новой.
+                let stillCurrent = await MainActor.run { () -> Bool in
+                    guard session == self.recordingSession else { return false }
+                    self.isTranscribingChunk = false
+                    return true
+                }
+                guard stillCurrent, !fullText.isEmpty else { return }
+
+                await self.handleTranscribedChunk(fullText, duration: chunkDuration, snapshotCount: snapshotCount, session: session)
             }
         }
     }
@@ -219,6 +231,7 @@ public final class RecordingCoordinator {
 
     /// Сброс состояния координатора
     private func resetState() {
+        recordingSession += 1   // новая запись — инвалидирует превью предыдущей
         partialTranscriptionText = ""
         isTranscribingChunk = false
         lastTranscribedSampleCount = 0
@@ -230,20 +243,21 @@ public final class RecordingCoordinator {
 
     /// Обработка транскрибированного чанка
     /// - Parameter snapshotCount: сколько сэмплов покрывает этот результат
-    private func handleTranscribedChunk(_ text: String, duration: Float, snapshotCount: Int) async {
+    private func handleTranscribedChunk(_ text: String, duration: Float, snapshotCount: Int, session: Int) async {
         // Проверка на стоп-слова
         if userSettings.containsStopWord(text) {
-            await handleStopWordDetected()
+            await handleStopWordDetected(session: session)
         } else {
-            await updatePartialTranscription(text, duration: duration, snapshotCount: snapshotCount)
+            await updatePartialTranscription(text, duration: duration, snapshotCount: snapshotCount, session: session)
         }
     }
 
     /// Обработка обнаружения стоп-слова
-    private func handleStopWordDetected() async {
+    private func handleStopWordDetected(session: Int) async {
         LogManager.app.info("🛑 Обнаружено стоп-слово - сброс буфера")
 
         await MainActor.run {
+            guard session == self.recordingSession else { return }  // запись сменилась
             // Сброс буфера и состояния
             audioService.clearBuffer()
             partialTranscriptionText = ""
@@ -260,8 +274,9 @@ public final class RecordingCoordinator {
     /// partialTranscriptionText и lastTranscribedSampleCount пишутся ВМЕСТЕ на
     /// MainActor — чтобы решение о переиспользовании на отпускании видело
     /// согласованную пару (текст ↔ сколько сэмплов он покрывает).
-    private func updatePartialTranscription(_ text: String, duration: Float, snapshotCount: Int) async {
+    private func updatePartialTranscription(_ text: String, duration: Float, snapshotCount: Int, session: Int) async {
         await MainActor.run {
+            guard session == self.recordingSession else { return }  // запись сменилась — отбрасываем
             // ЗАМЕНЯЕМ текст полностью (не накапливаем!), т.к. транскрибируем всё аудио заново
             partialTranscriptionText = text
             lastTranscribedSampleCount = snapshotCount
@@ -358,8 +373,9 @@ public final class RecordingCoordinator {
         if let plan = plan {
             let coverageStart = min(plan.coverage, audioData.count)
             let tail = Array(audioData[coverageStart...])
-            // Ждём in-flight, только если хвост после его снапшота — тишина по энергии.
-            if tail.isEmpty || silenceDetector.energyRMS(tail) < Self.reuseTailSilenceRMS {
+            // Ждём in-flight, только если ВЕСЬ хвост после его снапшота — тишина
+            // (оконная проверка: одиночное среднее RMS спрятало бы короткое слово).
+            if silenceDetector.isContinuousSilence(tail, rmsThreshold: Self.reuseTailSilenceRMS) {
                 await plan.task?.value
                 reusedText = await reusablePartialTranscription(for: audioData)
             }
@@ -416,8 +432,8 @@ public final class RecordingCoordinator {
         let tail = Array(audioData[start...])
         // НЕ используем isSilence: он считает любой хвост < 0.3с тишиной
         // (minSpeechDuration) и мог бы отбросить короткое последнее слово.
-        // Проверяем именно энергию хвоста (пустой хвост → тоже ок).
-        guard tail.isEmpty || silenceDetector.energyRMS(tail) < Self.reuseTailSilenceRMS else { return nil }
+        // Оконная проверка тишины: любое окно с энергией → не переиспользуем.
+        guard silenceDetector.isContinuousSilence(tail, rmsThreshold: Self.reuseTailSilenceRMS) else { return nil }
         return partialTranscriptionText
     }
 
