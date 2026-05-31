@@ -44,9 +44,14 @@ public class TextInserter: TextInserterProtocol {
 
         LogManager.app.debug("Текст скопирован в clipboard")
 
-        // ВАЖНО: Задержка перед Cmd+V чтобы система "забыла" про F16
-        // Иначе F16 + Cmd может интерпретироваться как системный шорткат (Emoji picker)
-        usleep(200000) // 200ms задержка для сброса состояния клавиатуры
+        // Дожидаемся, пока пользователь физически отпустит модификаторы (Shift при
+        // submit-режиме, сам fn-хоткей, Cmd/Ctrl/Opt). Иначе синтетические Cmd+V и
+        // Return «слипаются» с зажатыми модификаторами на HID-уровне: получается
+        // Cmd+Shift+V, fn+… (оконные шорткаты macOS Tahoe — разворот/сворачивание
+        // окна) и т.п. Фиксированная задержка не спасала, когда Shift держат всю
+        // отправку, — поэтому ждём именно отпускания (с таймаутом).
+        waitForModifiersToClear()
+        usleep(40000) // короткая стабилизация после отпускания
 
         // Симулируем Cmd+V
         simulatePaste()
@@ -77,6 +82,12 @@ public class TextInserter: TextInserterProtocol {
             LogManager.app.failure("Создание CGEvent", message: "Не удалось создать события Enter")
             return
         }
+        // На случай, если Shift всё ещё зажат, — дожидаемся отпускания и явно
+        // обнуляем флаги, чтобы ушёл чистый Return, а не Shift+Return (перевод
+        // строки вместо отправки) или иной модифицированный вариант.
+        waitForModifiersToClear()
+        down.flags = []
+        up.flags = []
         down.post(tap: .cghidEventTap)
         usleep(20000) // 20ms между down и up
         up.post(tap: .cghidEventTap)
@@ -120,6 +131,26 @@ public class TextInserter: TextInserterProtocol {
 
         keyVUp.post(tap: .cghidEventTap)
         LogManager.app.debug("Отправлено: Cmd+V up")
+    }
+
+    /// Дожидается отпускания физических модификаторов (Shift/Cmd/Ctrl/Opt/fn),
+    /// чтобы синтетические нажатия (Cmd+V, Return) не «слипались» с зажатыми
+    /// клавишами на HID-уровне. Ограничено таймаутом, чтобы не зависнуть, если
+    /// клавишу действительно удерживают.
+    private func waitForModifiersToClear(timeoutMs: Int = 600) {
+        let watched: CGEventFlags = [.maskShift, .maskCommand, .maskControl, .maskAlternate, .maskSecondaryFn]
+        let stepUs: UInt32 = 15000
+        var waitedUs = 0
+        while waitedUs < timeoutMs * 1000 {
+            let held = CGEventSource.flagsState(.combinedSessionState).intersection(watched)
+            if held.isEmpty { return }
+            usleep(stepUs)
+            waitedUs += Int(stepUs)
+        }
+        let stillHeld = CGEventSource.flagsState(.combinedSessionState).intersection(watched)
+        if !stillHeld.isEmpty {
+            LogManager.app.debug("Модификаторы всё ещё зажаты после ожидания (rawFlags=\(stillHeld.rawValue)); вставляю как есть")
+        }
     }
 
     /// Восстановление старого содержимого clipboard
