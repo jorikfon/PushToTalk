@@ -135,8 +135,15 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
                     let eventFlags = event.flags
                     // Маска для пользовательских модификаторов (без device-independent flags)
                     let relevantMask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
-                    let eventMods = eventFlags.intersection(relevantMask)
+                    var eventMods = eventFlags.intersection(relevantMask)
                     let targetMods = ctx.modifiers.intersection(relevantMask)
+
+                    // Лишний Shift поверх комбинации — это сигнал "отправить" (см. submit
+                    // ниже), а не часть хоткея. Не учитываем его при сопоставлении, иначе
+                    // press/release с зажатым Shift не совпадёт и запись застрянет.
+                    if !targetMods.contains(.maskShift) {
+                        eventMods.remove(.maskShift)
+                    }
 
                     guard eventMods == targetMods else {
                         return Unmanaged.passRetained(event)
