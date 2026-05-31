@@ -21,10 +21,17 @@ public class AudioFeedbackManager: ObservableObject {
 
     private init() {
         self.soundEnabled = UserDefaults.standard.object(forKey: "audioFeedbackEnabled") as? Bool ?? true
-        setupAudioEngine()
+        // НЕ инициализируем AVAudioEngine здесь. Это синхронно обращается к аудио-HAL
+        // (создание IO-unit) и при его залипании вешает ВЕСЬ запуск приложения вместе
+        // с регистрацией хоткея (AudioFeedbackManager.shared создаётся в AppCoordinator.init).
+        // Движок нужен только синтезированным кликам (startAdvancedProcessingSound) и
+        // создаётся лениво. Обычные звуки (playStartSound и пр.) используют NSSound.
     }
 
+    /// Ленивая инициализация аудио-движка. Идемпотентна. Вызывается только когда
+    /// реально нужны синтезированные клики — вне критического пути запуска.
     private func setupAudioEngine() {
+        guard audioEngine == nil else { return }
         audioEngine = AVAudioEngine()
         playerNode = AVAudioPlayerNode()
 
@@ -148,6 +155,7 @@ public class AudioFeedbackManager: ObservableObject {
     /// Start advanced processing sound with synthesized clicks
     public func startAdvancedProcessingSound() {
         guard soundEnabled else { return }
+        setupAudioEngine()  // ленивое создание движка при первом реальном использовании
         guard let player = playerNode else { return }
 
         stopProcessingSound()
