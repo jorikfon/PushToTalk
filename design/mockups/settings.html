@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PushToTalk — Settings (Refined Native mockup)</title>
+<style>
+  /* ============================================================
+     NATIVE SIMULATOR — approximates SwiftUI/AppKit rendering.
+     Fonts: real SF Pro via -apple-system. Vibrancy: backdrop-filter
+     approximates NSVisualEffectView (real material differs slightly).
+     Icons: hand-drawn SVG approximating SF Symbols.
+     Tokens mirror design/DESIGN-SYSTEM.md.
+     ============================================================ */
+
+  :root {
+    /* color — one accent + neutrals (see DESIGN-SYSTEM §1) */
+    --accent: #0a7aff;              /* macOS system accent (blue default) */
+    --accent-soft: rgba(10,122,255,.14);
+    --label: rgba(0,0,0,.85);
+    --secondary: rgba(0,0,0,.5);
+    --tertiary: rgba(0,0,0,.28);
+    --quaternary: rgba(0,0,0,.045); /* card fill */
+    --hairline: rgba(0,0,0,.08);    /* separators / card border */
+    --state-recording: #ff453a;
+    --state-ready: #34c759;
+
+    /* radius (§4) */
+    --r-control: 6px;
+    --r-card: 10px;
+    --r-window: 16px;
+
+    /* spacing (§3) */
+    --s-xs: 4px; --s-sm: 8px; --s-md: 12px; --s-lg: 16px; --s-xl: 24px;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: var(--label);
+    /* desktop backdrop so vibrancy reads */
+    background:
+      radial-gradient(120% 120% at 20% 0%, #c9d6e8 0%, #aab8d0 38%, #8fa0bf 70%, #7d8fb3 100%);
+    display:flex; align-items:center; justify-content:center;
+    min-height:100vh; padding:48px;
+  }
+
+  /* ---- WINDOW ---- */
+  .window {
+    width: 900px; height: 650px;
+    border-radius: var(--r-window);
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    box-shadow:
+      0 0 0 .5px rgba(0,0,0,.12),
+      0 30px 60px -12px rgba(0,0,0,.38),
+      0 8px 20px -8px rgba(0,0,0,.25);
+    background: #ffffff;
+  }
+
+  /* ---- SIDEBAR (vibrant .sidebar material approximation) ---- */
+  .sidebar {
+    position: relative;
+    background: rgba(245,246,248,.72);
+    backdrop-filter: blur(40px) saturate(160%);
+    -webkit-backdrop-filter: blur(40px) saturate(160%);
+    border-right: .5px solid var(--hairline);
+    display:flex; flex-direction:column;
+  }
+
+  /* traffic lights */
+  .titlebar { height:44px; display:flex; align-items:center; padding:0 var(--s-lg); gap:8px; -webkit-app-region:drag; }
+  .dot { width:12px; height:12px; border-radius:50%; }
+  .dot.r{background:#ff5f57; box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12);}
+  .dot.y{background:#febc2e; box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12);}
+  .dot.g{background:#28c840; box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12);}
+
+  .brand { display:flex; align-items:center; gap:var(--s-sm); padding:0 var(--s-lg) var(--s-md); }
+  .brand .glyph {
+    width:26px;height:26px;border-radius:7px;
+    background: linear-gradient(160deg, var(--accent), #4aa3ff);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow: 0 1px 2px rgba(10,122,255,.4);
+  }
+  .brand .glyph svg{width:16px;height:16px;color:#fff;}
+  .brand .name { font-size:13px; font-weight:600; letter-spacing:-.01em; }
+  .brand .name small { display:block; font-size:10px; font-weight:400; color:var(--secondary); letter-spacing:0; }
+
+  .nav { padding: var(--s-sm) var(--s-md); display:flex; flex-direction:column; gap:2px; flex:1; }
+  .nav .group-label { font-size:10px; font-weight:600; color:var(--tertiary); text-transform:uppercase; letter-spacing:.04em; padding:var(--s-md) var(--s-sm) var(--s-xs); }
+  .item {
+    height:28px; display:flex; align-items:center; gap:var(--s-sm);
+    padding:0 var(--s-sm); border-radius:var(--r-control);
+    font-size:13px; color:var(--label); cursor:default;
+    transition: background .18s ease;
+  }
+  .item svg{ width:16px;height:16px; color:var(--secondary); flex:none; }
+  .item:hover { background: rgba(0,0,0,.04); }
+  .item.active { background: var(--accent-soft); color:var(--accent); font-weight:500; }
+  .item.active svg{ color:var(--accent); }
+
+  .sidebar-footer { padding: var(--s-md) var(--s-lg); border-top:.5px solid var(--hairline); display:flex; align-items:center; gap:var(--s-sm); }
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--state-ready);box-shadow:0 0 6px rgba(52,199,89,.6);}
+  .sidebar-footer .txt{font-size:11px;color:var(--secondary);}
+
+  /* ---- CONTENT ---- */
+  .content { background:#fff; display:flex; flex-direction:column; overflow:hidden; }
+  .content-titlebar { height:44px; -webkit-app-region:drag; }
+  .content-head { padding: 0 var(--s-xl) var(--s-lg); }
+  .content-head h1 { font-size:22px; font-weight:600; letter-spacing:-.02em; }
+  .content-head p { font-size:12px; color:var(--secondary); margin-top:2px; }
+  .scroll { flex:1; overflow:auto; padding: var(--s-lg) var(--s-xl) var(--s-xl); }
+
+  /* staggered reveal — the one orchestrated moment (§6) */
+  .card { opacity:0; transform: translateY(6px); animation: rise .42s cubic-bezier(.2,.7,.2,1) forwards; }
+  .card:nth-child(1){animation-delay:.04s;}
+  .card:nth-child(2){animation-delay:.10s;}
+  .card:nth-child(3){animation-delay:.16s;}
+  @keyframes rise { to { opacity:1; transform:none; } }
+
+  /* ---- CARD ---- */
+  .card {
+    background: var(--quaternary);
+    border: .5px solid var(--hairline);
+    border-radius: var(--r-card);
+    padding: var(--s-lg);
+    margin-bottom: var(--s-lg);
+    max-width: 620px;
+  }
+  .card-head { display:flex; align-items:center; gap:var(--s-sm); }
+  .card-head svg{ width:16px;height:16px;color:var(--secondary); }
+  .card-head h2 { font-size:13px; font-weight:600; }
+  .card-sep { height:.5px; background:var(--hairline); margin:var(--s-md) 0; }
+  .card .desc { font-size:11px; color:var(--secondary); line-height:1.45; }
+
+  /* chips / stop words */
+  .chips { display:flex; flex-wrap:wrap; gap:var(--s-sm); margin-top:var(--s-md); }
+  .chip {
+    display:flex;align-items:center;gap:6px;
+    height:24px;padding:0 var(--s-sm) 0 10px;
+    background:#fff; border:.5px solid var(--hairline);
+    border-radius:var(--r-control); font-size:12px;
+  }
+  .chip .x{ width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--tertiary); }
+  .chip .x svg{width:9px;height:9px;}
+
+  .field-row{ display:flex; align-items:center; gap:var(--s-sm); margin-top:var(--s-md); }
+  .input { height:24px; border:.5px solid var(--hairline); border-radius:var(--r-control); background:#fff; padding:0 var(--s-sm); font-size:12px; width:180px; }
+  .input:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .btn { height:24px; padding:0 12px; border-radius:var(--r-control); font-size:12px; border:.5px solid var(--hairline); background:#fff; cursor:default; }
+  .btn.primary{ background:var(--accent); color:#fff; border-color:transparent; box-shadow:0 1px 1.5px rgba(10,122,255,.4); }
+
+  .setting-row{ display:flex; align-items:center; justify-content:space-between; min-height:28px; }
+  .setting-row + .setting-row{ margin-top:var(--s-sm); }
+  .setting-row .label{ font-size:13px; }
+  .setting-row .sub{ font-size:11px; color:var(--secondary); margin-top:1px; }
+
+  /* native-ish stepper */
+  .stepper{ display:flex; align-items:center; gap:6px; }
+  .stepper .val{ font-variant-numeric:tabular-nums; font-size:13px; width:40px; text-align:right; }
+  .stepper .pm{ display:flex; flex-direction:column; border:.5px solid var(--hairline); border-radius:5px; overflow:hidden; }
+  .stepper .pm button{ width:18px;height:11px; background:#fff; border:none; display:flex;align-items:center;justify-content:center; }
+  .stepper .pm button:first-child{ border-bottom:.5px solid var(--hairline); }
+  .stepper .pm svg{ width:7px;height:7px;color:var(--secondary); }
+
+  /* native switch */
+  .switch{ width:36px;height:21px;border-radius:21px;background:var(--accent);position:relative;flex:none; }
+  .switch.off{ background:rgba(0,0,0,.12); }
+  .switch::after{ content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .18s; }
+  .switch.off::after{ left:2px; } .switch:not(.off)::after{ left:17px; }
+
+  .info-line{ display:flex; align-items:center; gap:6px; margin-top:var(--s-md); font-size:11px; color:var(--secondary); }
+  .info-line svg{ width:13px;height:13px;color:var(--tertiary); }
+</style>
+</head>
+<body>
+  <div class="window">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar">
+      <div class="titlebar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      </div>
+      <div class="brand">
+        <span class="glyph">
+          <!-- waveform -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h0M8 8v8M12 4v16M16 8v8M20 12h0"/></svg>
+        </span>
+        <span class="name">PushToTalk<small>Settings</small></span>
+      </div>
+
+      <nav class="nav">
+        <div class="item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3 1.6 1.6 0 0 0 .9-1.4V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8 1.6 1.6 0 0 0 1.4.9H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.4.9z"/></svg>
+          General
+        </div>
+        <div class="item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>
+          Models
+        </div>
+        <div class="item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h0M10 10h0M14 10h0M18 10h0M8 14h8" stroke-linecap="round"/></svg>
+          Hotkey
+        </div>
+        <div class="item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h11M4 12h11M4 19h7"/><path d="M18 9l3 3-3 3"/></svg>
+          Vocabulary
+        </div>
+        <div class="item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          Audio
+        </div>
+        <div class="item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+          History
+        </div>
+        <div style="flex:1"></div>
+        <div class="item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="7"/><path d="M12 6V3M8 4l1.5 2M16 4l-1.5 2M5 11H2M22 11h-3M9 13h6"/></svg>
+          Debug
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="status-dot"></span>
+        <span class="txt">Ready · large-v3</span>
+      </div>
+    </aside>
+
+    <!-- ============ CONTENT ============ -->
+    <main class="content">
+      <div class="content-titlebar"></div>
+      <div class="content-head">
+        <h1>General</h1>
+        <p>Recording behavior and stop words</p>
+      </div>
+      <div class="scroll">
+
+        <!-- Card: Stop Words -->
+        <section class="card">
+          <div class="card-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11V7a2 2 0 0 1 4 0v4M8 11V8a2 2 0 0 1 4 0v3M16 11v-1a2 2 0 0 1 4 0v5a6 6 0 0 1-6 6h-2a6 6 0 0 1-5.5-3.6L4 14a2 2 0 0 1 3.4-2L8 13"/></svg>
+            <h2>Stop Words</h2>
+          </div>
+          <div class="card-sep"></div>
+          <p class="desc">Saying any of these words ends recording immediately. Useful for hands-free finish.</p>
+          <div class="chips">
+            <span class="chip">стоп <span class="x"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></span></span>
+            <span class="chip">конец <span class="x"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></span></span>
+            <span class="chip">stop <span class="x"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></span></span>
+          </div>
+          <div class="field-row">
+            <input class="input" placeholder="Add stop word…">
+            <button class="btn">Add</button>
+          </div>
+        </section>
+
+        <!-- Card: Recording -->
+        <section class="card">
+          <div class="card-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 1.5M12 2h0M9 2h6"/></svg>
+            <h2>Recording</h2>
+          </div>
+          <div class="card-sep"></div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Maximum duration</div>
+              <div class="sub">Auto-stop after this many seconds</div>
+            </div>
+            <div class="stepper">
+              <span class="val">60 s</span>
+              <span class="pm">
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg></button>
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+              </span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Silence auto-stop</div>
+              <div class="sub">End recording after a pause</div>
+            </div>
+            <span class="switch"></span>
+          </div>
+          <div class="info-line">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/></svg>
+            Transcription inserts at the cursor in the frontmost app.
+          </div>
+        </section>
+
+        <!-- Card: Feedback -->
+        <section class="card">
+          <div class="card-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+            <h2>Sound Feedback</h2>
+          </div>
+          <div class="card-sep"></div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Play sounds</div>
+              <div class="sub">Cues for start, stop, success and error</div>
+            </div>
+            <span class="switch"></span>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+</body>
+</html>

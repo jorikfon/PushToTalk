@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>PushToTalk — Recording window</title>
+<style>
+  /* Floating recording window — dark refined HUD.
+     Approximates a borderless NSPanel with .hudWindow vibrancy
+     floating above all apps. Single state color (semantic). */
+  :root{
+    --rec:#ff453a; --ready:#34c759; --proc:#ff9f0a; --accent:#0a7aff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{
+    font-family:-apple-system,"SF Pro Text",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+    /* a "desktop" so the floating panel reads as an overlay */
+    background:
+      linear-gradient(rgba(8,10,16,.55),rgba(8,10,16,.55)),
+      radial-gradient(120% 120% at 70% 10%, #2a3450 0%, #161b2b 55%, #0c0f18 100%);
+    display:flex; flex-wrap:wrap; gap:56px; align-items:center; justify-content:center; padding:64px;
+  }
+  .label{ position:absolute; top:-22px; left:4px; font-size:11px; color:rgba(255,255,255,.45); }
+  .stage{ position:relative; }
+
+  /* ---- panel base (dark glass) ---- */
+  .panel{
+    position:relative; color:rgba(255,255,255,.92);
+    background:rgba(28,30,38,.66);
+    backdrop-filter:blur(30px) saturate(150%); -webkit-backdrop-filter:blur(30px) saturate(150%);
+    border:.5px solid rgba(255,255,255,.14); border-radius:18px;
+    box-shadow:0 20px 50px -12px rgba(0,0,0,.6), 0 2px 8px rgba(0,0,0,.4);
+  }
+  .panel.rec{ box-shadow:0 0 0 .5px rgba(255,69,58,.4), 0 20px 50px -12px rgba(0,0,0,.6), 0 0 40px -8px rgba(255,69,58,.35); }
+
+  .rw{ width:400px; padding:18px; }
+  .head{ display:flex; align-items:center; gap:10px; }
+  .mic{ width:30px;height:30px;border-radius:9px; display:flex;align-items:center;justify-content:center;
+    background:rgba(255,69,58,.16); }
+  .mic svg{ width:16px;height:16px;color:var(--rec); }
+  .head .dev{ font-size:11px; color:rgba(255,255,255,.5); }
+  .head .grow{ flex:1; }
+  .timer{ font:13px/1 "SF Mono",ui-monospace,Menlo,monospace; font-variant-numeric:tabular-nums; color:rgba(255,255,255,.8); }
+  .pulse{ width:8px;height:8px;border-radius:50%;background:var(--rec); box-shadow:0 0 10px var(--rec);
+    animation:pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;transform:scale(1);} 50%{opacity:.4;transform:scale(.7);} }
+
+  /* waveform */
+  .wave{ display:flex; align-items:center; gap:3px; height:26px; margin:14px 2px 12px; }
+  .wave i{ width:3px; border-radius:2px; background:rgba(255,255,255,.55); animation:bar 1s ease-in-out infinite; }
+  @keyframes bar{ 0%,100%{height:6px;} 50%{height:22px;} }
+  .wave i:nth-child(odd){ animation-delay:.15s;background:var(--rec);opacity:.85; }
+  .wave i:nth-child(3n){ animation-delay:.3s; }
+  .wave i:nth-child(4n){ animation-delay:.45s; }
+
+  .text{ font-size:13px; line-height:1.5; color:rgba(255,255,255,.92); min-height:36px; }
+  .text .ph{ color:rgba(255,255,255,.4); }
+  .foot{ display:flex; align-items:center; gap:6px; margin-top:12px; font-size:10px; color:rgba(255,255,255,.45); }
+  .foot svg{ width:11px;height:11px; }
+  .chip{ display:inline-flex;align-items:center;gap:5px; font-size:10px; padding:2px 8px; border-radius:6px; }
+  .chip.rec{ background:rgba(255,69,58,.16); color:#ff8a82; }
+  .chip.proc{ background:rgba(255,159,10,.16); color:#ffc55c; }
+
+  /* spinner */
+  .spin{ width:13px;height:13px;border:2px solid rgba(255,255,255,.25); border-top-color:var(--proc);
+    border-radius:50%; animation:rot .8s linear infinite; }
+  @keyframes rot{ to{transform:rotate(360deg);} }
+
+  /* ---- compact orb ---- */
+  .orb{ width:64px;height:64px;border-radius:50%; display:flex;align-items:center;justify-content:center;
+    background:rgba(28,30,38,.66); backdrop-filter:blur(30px) saturate(150%); -webkit-backdrop-filter:blur(30px) saturate(150%);
+    border:.5px solid rgba(255,255,255,.14);
+    box-shadow:0 12px 30px -8px rgba(0,0,0,.6), 0 0 26px -6px rgba(10,122,255,.4); }
+  .orb svg{ width:28px;height:28px;color:#5aa9ff; }
+</style>
+</head><body>
+
+  <!-- Recording -->
+  <div class="stage"><span class="label">Recording</span>
+    <div class="panel rec rw">
+      <div class="head">
+        <span class="mic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
+        <div><div style="font-size:12px;font-weight:500">Recording</div><div class="dev">MacBook Pro Microphone</div></div>
+        <span class="grow"></span>
+        <span class="timer">00:07</span>
+        <span class="pulse"></span>
+      </div>
+      <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="text">Добавь обработку ошибок загрузки модели<span class="ph"> и покажи прогресс…</span></div>
+      <div class="foot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+        large-v3 · Metal
+      </div>
+    </div>
+  </div>
+
+  <!-- Transcribing -->
+  <div class="stage"><span class="label">Transcribing</span>
+    <div class="panel rw">
+      <div class="head">
+        <span class="mic" style="background:rgba(255,159,10,.16)"><span class="spin"></span></span>
+        <div><div style="font-size:12px;font-weight:500">Transcribing…</div><div class="dev">MacBook Pro Microphone</div></div>
+        <span class="grow"></span>
+        <span class="chip proc">processing</span>
+      </div>
+      <div class="text" style="margin-top:14px">Добавь обработку ошибок загрузки модели и покажи прогресс в строке состояния.</div>
+      <div class="foot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+        large-v3 · Metal
+      </div>
+    </div>
+  </div>
+
+  <!-- Compact -->
+  <div class="stage"><span class="label">Idle / compact</span>
+    <div class="orb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 12h0M8 8v8M12 5v14M16 8v8M20 12h0"/></svg></div>
+  </div>
+
+</body></html>

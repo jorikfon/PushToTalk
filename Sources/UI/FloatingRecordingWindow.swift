@@ -300,49 +300,24 @@ struct RecordingStatusView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    // Цвет таймера (красный если меньше 10 секунд)
+    // Цвет таймера (семантический красный если меньше 10 секунд)
     private var timerColor: Color {
-        viewModel.remainingTime < 10 ? .red : .secondary
+        viewModel.remainingTime < 10 ? UIConstants.StateColors.recording : .secondary
     }
 
     var body: some View {
         ZStack {
-            // Liquid Glass Background
+            // Refined Native: тёмный HUD-материал + мягкое семантическое свечение
             ZStack {
-                // Основной blur
                 VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
 
-                // Градиентные overlays
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.white.opacity(0.25),
-                        Color.white.opacity(0.12),
-                        Color.white.opacity(0.18),
-                        Color.white.opacity(0.08)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .blendMode(.overlay)
-
-                // Динамическое свечение
+                // Динамическое свечение состояния (семантическое)
                 stateGlow
                     .blendMode(.softLight)
 
-                // Градиентная граница
+                // Тонкая граница
                 RoundedRectangle(cornerRadius: dynamicCornerRadius)
-                    .strokeBorder(
-                        LinearGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: Color.white.opacity(0.6), location: 0.0),
-                                .init(color: Color.white.opacity(0.25), location: 0.5),
-                                .init(color: Color.white.opacity(0.5), location: 1.0)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.5
-                    )
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
             }
             .cornerRadius(dynamicCornerRadius)
             .shadow(color: stateShadowColor.opacity(0.25), radius: 12, x: 0, y: 6)
@@ -381,7 +356,7 @@ struct RecordingStatusView: View {
         case .processingCompact:
             return 30  // Круглое окно
         default:
-            return 20
+            return UIConstants.Radius.window
         }
     }
 
@@ -420,11 +395,11 @@ struct RecordingStatusView: View {
                 endRadius: 200
             )
         case .processingCompact:
-            // Синее пульсирующее свечение при обработке
+            // Акцентное свечение при обработке
             RadialGradient(
                 gradient: Gradient(colors: [
-                    Color.blue.opacity(0.15),
-                    Color.cyan.opacity(0.08),
+                    UIConstants.Palette.accent.opacity(0.18),
+                    UIConstants.Palette.accent.opacity(0.08),
                     Color.clear
                 ]),
                 center: .center,
@@ -440,9 +415,9 @@ struct RecordingStatusView: View {
     private var stateShadowColor: Color {
         switch viewModel.state {
         case .recording, .recordingWithText, .processing:
-            return .red
+            return UIConstants.StateColors.recording
         case .processingCompact:
-            return .blue
+            return UIConstants.Palette.accent
         default:
             return .clear
         }
@@ -457,13 +432,7 @@ struct RecordingStatusView: View {
             HStack {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(
-                        LinearGradient(
-                            gradient: Gradient(colors: [.red, .pink]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .foregroundColor(UIConstants.StateColors.recording)
 
                 Circle()
                     .fill(Color.red)
@@ -554,13 +523,7 @@ struct RecordingStatusView: View {
             // Пульсирующая волна
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 30))
-                .foregroundStyle(
-                    LinearGradient(
-                        gradient: Gradient(colors: [.blue, .cyan]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .foregroundColor(UIConstants.Palette.accent)
                 .scaleEffect(viewModel.pulseAnimation ? 1.15 : 1.0)
                 .opacity(viewModel.pulseAnimation ? 1.0 : 0.6)
                 .animation(

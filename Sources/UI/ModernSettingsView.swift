@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Современное окно настроек с боковым меню и Liquid Glass эффектом
+/// Окно настроек с боковым меню (Refined Native: vibrancy + один акцент)
 struct ModernSettingsView: View {
     @ObservedObject var controller: MenuBarController
 
@@ -45,91 +45,43 @@ struct ModernSettingsView: View {
 
         var icon: String {
             switch self {
-            case .debug: return "ladybug.fill"
-            case .general: return "gearshape.fill"
+            case .debug: return "ladybug"
+            case .general: return "gearshape"
             case .models: return "cpu"
-            case .hotkeys: return "keyboard.fill"
-            case .vocabulary: return "book.fill"
-            case .audio: return "speaker.wave.3.fill"
-            case .history: return "clock.fill"
-            }
-        }
-
-        var color: Color {
-            switch self {
-            case .debug: return .red
-            case .general: return .blue
-            case .models: return .purple
-            case .hotkeys: return .orange
-            case .vocabulary: return .green
-            case .audio: return .pink
-            case .history: return .cyan
+            case .hotkeys: return "keyboard"
+            case .vocabulary: return "character.book.closed"
+            case .audio: return "mic"
+            case .history: return "clock"
             }
         }
     }
 
     var body: some View {
         ZStack {
-            // Liquid Glass Background
-            ZStack {
-                // Основной blur
-                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
-
-                // Градиентный overlay для стеклянного эффекта
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.white.opacity(0.25),
-                        Color.white.opacity(0.1),
-                        Color.white.opacity(0.15)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+            // Refined Native background: один материал, без белых оверлеев
+            VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
+                .clipShape(RoundedRectangle(cornerRadius: UIConstants.Radius.window))
+                .overlay(
+                    RoundedRectangle(cornerRadius: UIConstants.Radius.window)
+                        .strokeBorder(UIConstants.Palette.hairline, lineWidth: 1)
                 )
-                .blendMode(.overlay)
-
-                // Тонкая граница
-                RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.white.opacity(0.6),
-                                Color.white.opacity(0.2),
-                                Color.white.opacity(0.4)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.5
-                    )
-            }
-            .cornerRadius(20)
-            .shadow(color: .black.opacity(0.15), radius: 15, x: 0, y: 5)
+                .shadow(color: .black.opacity(0.15), radius: 15, x: 0, y: 5)
 
             // Content with Sidebar
             HStack(spacing: 0) {
                 // Sidebar
                 sidebarView
-                    .frame(width: 220)
+                    .frame(width: 200)
 
-                // Vertical Divider
+                // Вертикальный разделитель — волосяная линия
                 Rectangle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.white.opacity(0.0),
-                                Color.white.opacity(0.3),
-                                Color.white.opacity(0.0)
-                            ]),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                    .fill(UIConstants.Palette.hairline)
                     .frame(width: 1)
 
                 // Content Area
                 contentView
             }
-            .padding(20)
+            .padding(UIConstants.Spacing.lg)
         }
         .frame(width: 900, height: 650)
         .alert("Delete Model", isPresented: $showingDeleteAlert) {
@@ -148,184 +100,124 @@ struct ModernSettingsView: View {
 
     private var sidebarView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    gradient: Gradient(colors: [
-                                        Color.blue.opacity(0.3),
-                                        Color.purple.opacity(0.2),
-                                        Color.clear
-                                    ]),
-                                    center: .center,
-                                    startRadius: 5,
-                                    endRadius: 25
-                                )
+            // Header — брендовый знак (единственный акцентный градиент)
+            VStack(alignment: .leading, spacing: UIConstants.Spacing.sm) {
+                HStack(spacing: UIConstants.Spacing.sm) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    UIConstants.Palette.accent,
+                                    UIConstants.Palette.accent.opacity(0.75)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
-                            .frame(width: 50, height: 50)
-
-                        Image(systemName: "waveform.circle.fill")
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [.blue, .purple]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .shadow(color: .blue.opacity(0.5), radius: 8, x: 0, y: 0)
-                    }
+                        )
+                        .frame(width: 32, height: 32)
+                        .overlay(
+                            Image(systemName: "waveform")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                        )
+                        .shadow(color: UIConstants.Palette.accent.opacity(0.4), radius: 4, x: 0, y: 1)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("PushToTalk")
-                            .font(.title3)
-                            .fontWeight(.bold)
+                            .font(UIConstants.Typography.headline)
                             .foregroundColor(.primary)
 
                         Text("Settings")
-                            .font(.caption)
-                            .foregroundColor(.secondary.opacity(0.8))
+                            .font(UIConstants.Typography.footnote)
+                            .foregroundColor(.secondary)
                     }
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
+                .padding(.horizontal, UIConstants.Spacing.lg)
+                .padding(.top, UIConstants.Spacing.sm)
 
-                // Recording indicator
+                // Индикатор записи (семантический красный)
                 if controller.isRecording {
-                    HStack(spacing: 8) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    RadialGradient(
-                                        gradient: Gradient(colors: [
-                                            Color.red.opacity(0.4),
-                                            Color.red.opacity(0.2),
-                                            Color.clear
-                                        ]),
-                                        center: .center,
-                                        startRadius: 3,
-                                        endRadius: 15
-                                    )
-                                )
-                                .frame(width: 30, height: 30)
-
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 8, height: 8)
-                        }
+                    HStack(spacing: UIConstants.Spacing.sm) {
+                        Circle()
+                            .fill(UIConstants.StateColors.recording)
+                            .frame(width: 7, height: 7)
+                            .shadow(color: UIConstants.StateColors.recording.opacity(0.6), radius: 4)
 
                         Text("Recording")
-                            .font(.caption)
+                            .font(UIConstants.Typography.caption)
                             .fontWeight(.medium)
-                            .foregroundColor(.red)
+                            .foregroundColor(UIConstants.StateColors.recording)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, UIConstants.Spacing.md)
+                    .padding(.vertical, UIConstants.Spacing.xs + 2)
                     .background(
                         Capsule()
-                            .fill(Color.red.opacity(0.1))
+                            .fill(UIConstants.StateColors.recording.opacity(0.12))
                     )
-                    .padding(.horizontal)
+                    .padding(.horizontal, UIConstants.Spacing.lg)
                 }
             }
-            .padding(.bottom, 16)
+            .padding(.bottom, UIConstants.Spacing.lg)
 
-            // Glass divider
+            // Разделитель
             Rectangle()
-                .fill(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.white.opacity(0.0),
-                            Color.white.opacity(0.3),
-                            Color.white.opacity(0.0)
-                        ]),
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
+                .fill(UIConstants.Palette.hairline)
                 .frame(height: 1)
-                .padding(.horizontal)
+                .padding(.horizontal, UIConstants.Spacing.md)
 
-            // Navigation Items
+            // Навигация
             ScrollView {
-                VStack(spacing: 4) {
+                VStack(spacing: 2) {
                     ForEach(SettingsSection.allCases) { section in
                         sidebarButton(section)
                     }
                 }
-                .padding(.vertical, 12)
+                .padding(.vertical, UIConstants.Spacing.sm)
+                .padding(.horizontal, UIConstants.Spacing.sm)
             }
 
             Spacer()
 
             // Footer
-            VStack(spacing: 8) {
+            VStack(spacing: UIConstants.Spacing.sm) {
                 Rectangle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.white.opacity(0.0),
-                                Color.white.opacity(0.3),
-                                Color.white.opacity(0.0)
-                            ]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .fill(UIConstants.Palette.hairline)
                     .frame(height: 1)
-                    .padding(.horizontal)
+                    .padding(.horizontal, UIConstants.Spacing.md)
 
                 Text("v1.0")
-                    .font(.caption2)
+                    .font(UIConstants.Typography.footnote)
                     .foregroundColor(.secondary)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, UIConstants.Spacing.sm)
             }
         }
     }
 
     private func sidebarButton(_ section: SettingsSection) -> some View {
-        Button(action: {
-            withAnimation(.easeInOut(duration: 0.2)) {
+        let isSelected = selectedSection == section
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.18)) {
                 selectedSection = section
             }
         }) {
-            HStack(spacing: 12) {
-                ZStack {
-                    if selectedSection == section {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(section.color.opacity(0.2))
-                            .frame(width: 36, height: 36)
-                    }
-
-                    Image(systemName: section.icon)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(selectedSection == section ? section.color : .secondary)
-                        .frame(width: 36, height: 36)
-                }
+            HStack(spacing: UIConstants.Spacing.sm) {
+                Image(systemName: section.icon)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundColor(isSelected ? UIConstants.Palette.accent : .secondary)
+                    .frame(width: 18)
 
                 Text(section.rawValue)
-                    .font(.system(size: 14, weight: selectedSection == section ? .semibold : .regular))
-                    .foregroundColor(selectedSection == section ? .primary : .secondary)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .foregroundColor(isSelected ? UIConstants.Palette.accent : .primary)
 
                 Spacer()
-
-                if selectedSection == section {
-                    Rectangle()
-                        .fill(section.color)
-                        .frame(width: 3, height: 24)
-                        .cornerRadius(1.5)
-                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, UIConstants.Spacing.sm)
+            .frame(height: 28)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(selectedSection == section ? Color.primary.opacity(0.05) : Color.clear)
+                RoundedRectangle(cornerRadius: UIConstants.Radius.control)
+                    .fill(isSelected ? UIConstants.Palette.accentSoft : Color.clear)
             )
-            .padding(.horizontal, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
@@ -335,39 +227,21 @@ struct ModernSettingsView: View {
 
     private var contentView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Section Header
-            HStack(spacing: 12) {
-                Image(systemName: selectedSection.icon)
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundColor(selectedSection.color)
+            // Заголовок секции — крупный титул, без декоративной иконки
+            Text(selectedSection.rawValue)
+                .font(UIConstants.Typography.largeTitle)
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, UIConstants.Spacing.xl)
+                .padding(.vertical, UIConstants.Spacing.lg)
 
-                Text(selectedSection.rawValue)
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.primary)
-
-                Spacer()
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
-
-            // Glass divider
+            // Разделитель
             Rectangle()
-                .fill(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.white.opacity(0.0),
-                            Color.white.opacity(0.3),
-                            Color.white.opacity(0.0)
-                        ]),
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
+                .fill(UIConstants.Palette.hairline)
                 .frame(height: 1)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, UIConstants.Spacing.xl)
 
-            // Section Content
+            // Контент секции
             ScrollView {
                 Group {
                     switch selectedSection {
@@ -387,7 +261,7 @@ struct ModernSettingsView: View {
                         HistorySettingsView(history: history, userSettings: userSettings)
                     }
                 }
-                .padding(24)
+                .padding(UIConstants.Spacing.xl)
             }
         }
     }

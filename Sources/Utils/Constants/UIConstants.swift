@@ -271,4 +271,53 @@ public enum UIConstants {
 
     /// Высота иконки в menu bar
     public static let menuBarIconHeight: CGFloat = 16
+
+    // MARK: - Refined Native Design Tokens
+    // Источник правды: design/DESIGN-SYSTEM.md. Цвет — семантический (состояние),
+    // не декоративный. Один акцент (системный) + нейтрали.
+
+    /// Палитра: один акцент + нейтрали. Цвет состояния — в StateColors.
+    public enum Palette {
+        /// Системный акцент пользователя (по умолчанию синий)
+        public static let accent = Color.accentColor
+        /// Мягкая подложка акцента (выделение в сайдбаре, фокус)
+        public static let accentSoft = Color.accentColor.opacity(0.14)
+        /// Заливка карточек / строк
+        public static let cardFill = Color.secondary.opacity(0.06)
+        /// Волосяная граница / разделитель
+        public static let hairline = Color.primary.opacity(0.08)
+    }
+
+    /// Шкала отступов (сетка 4 pt)
+    public enum Spacing {
+        public static let xs: CGFloat = 4
+        public static let sm: CGFloat = 8
+        public static let md: CGFloat = 12
+        public static let lg: CGFloat = 16
+        public static let xl: CGFloat = 24
+    }
+
+    /// Иерархия радиусов
+    public enum Radius {
+        /// Бейджи, чипы, мелкие контролы
+        public static let control: CGFloat = 6
+        /// Карточки, строки списков, пилюля выбора
+        public static let card: CGFloat = 10
+        /// Окно / плавающая панель
+        public static let window: CGFloat = 16
+    }
+
+    /// Тайп-скейл (SF Pro / SF Mono)
+    public enum Typography {
+        public static let largeTitle = Font.system(size: 22, weight: .semibold)
+        public static let title = Font.title3.weight(.semibold)
+        public static let headline = Font.system(size: 13, weight: .semibold)
+        public static let body = Font.system(size: 13)
+        public static let subheadline = Font.subheadline
+        public static let caption = Font.caption
+        public static let footnote = Font.caption2
+        public static func mono(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> Font {
+            .system(size: size, weight: weight, design: .monospaced)
+        }
+    }
 }
