@@ -193,6 +193,7 @@ public final class RecordingCoordinator {
             guard !self.isTranscribingChunk else { return }
 
             self.isTranscribingChunk = true
+            self.floatingWindow.setTranscribing(true)   // индикатор «распознаю…» в окне
             let session = self.recordingSession
             let chunkDuration = Float(chunk.count) / Float(AppConstants.Audio.whisperSampleRate)
 
@@ -211,6 +212,7 @@ public final class RecordingCoordinator {
                 let stillCurrent = await MainActor.run { () -> Bool in
                     guard session == self.recordingSession else { return false }
                     self.isTranscribingChunk = false
+                    self.floatingWindow.setTranscribing(false)  // догнали аудио → «готово»
                     return true
                 }
                 guard stillCurrent, !fullText.isEmpty else { return }
@@ -227,6 +229,7 @@ public final class RecordingCoordinator {
         recordingSession += 1   // новая запись — инвалидирует превью предыдущей
         partialTranscriptionText = ""
         isTranscribingChunk = false
+        floatingWindow.setTranscribing(false)
         inFlightChunkTask?.cancel()
         inFlightChunkTask = nil
         audioService.clearBuffer()

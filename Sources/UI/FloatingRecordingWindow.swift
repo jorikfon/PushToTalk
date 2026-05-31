@@ -88,6 +88,15 @@ public class FloatingRecordingWindow: NSWindow {
         }
     }
 
+    /// Показать/скрыть индикатор активного распознавания.
+    /// true — крутится «распознаю…» (стоит подождать, текст ещё обновится);
+    /// false — система догнала аудио, показанный текст актуален.
+    public func setTranscribing(_ active: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            self?.viewModel.isTranscribing = active
+        }
+    }
+
     /// Обновить бейдж движка (какой ускоритель задействован) и скорость последней
     /// транскрипции. Показывается во время записи, чтобы было наглядно и честно.
     public func updateEngineInfo(engine: String, averageRTF: Double, lastTime: TimeInterval) {
@@ -212,6 +221,7 @@ class RecordingViewModel: ObservableObject {
     @Published var remainingTime: TimeInterval = 60.0  // Оставшееся время
     @Published var engineInfo: String = ""             // Движок ускорения (ANE/GPU/устройство)
     @Published var speedInfo: String = ""              // Скорость последней транскрипции (RTF)
+    @Published var isTranscribing: Bool = false        // Идёт ли сейчас распознавание чанка
 
     private var startTime: Date?
     private var maxDuration: TimeInterval = 60.0
@@ -466,6 +476,27 @@ struct RecordingStatusView: View {
                     Text(viewModel.audioDeviceName)
                         .font(.caption)
                         .foregroundColor(.secondary.opacity(0.7))
+                }
+
+                // Статус распознавания: крутится «распознаю…» → ждём; «готово» → текст актуален
+                if viewModel.isTranscribing {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.7)
+                        Text("распознаю…")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                } else if !partialText.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundColor(.green)
+                        Text("готово")
+                            .font(.caption2)
+                            .foregroundColor(.green.opacity(0.85))
+                    }
                 }
 
                 Spacer()
