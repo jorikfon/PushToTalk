@@ -53,6 +53,14 @@ else
     exit 1
 fi
 
+# Stamp build number with a timestamp so each build is identifiable in-app.
+# Applied to the bundle's Info.plist only (source stays clean); must run BEFORE
+# codesign so the signature seals the stamped plist.
+BUILD_NUMBER=$(date +%Y%m%d.%H%M%S)
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${CONTENTS_DIR}/Info.plist" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${BUILD_NUMBER}" "${CONTENTS_DIR}/Info.plist"
+echo -e "${GREEN}✅ Build number: ${BUILD_NUMBER}${NC}"
+
 # Copy icon if exists (optional for now)
 if [ -f "Resources/AppIcon.icns" ]; then
     cp "Resources/AppIcon.icns" "${RESOURCES_DIR}/"

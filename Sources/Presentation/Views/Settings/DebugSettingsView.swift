@@ -4,6 +4,15 @@ import SwiftUI
 struct DebugSettingsView: View {
     @ObservedObject var controller: MenuBarController
 
+    // Версия и номер сборки читаем напрямую из бандла (CFBundleVersion штампуется
+    // меткой времени в build_app.sh при каждой сборке).
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+    private var buildNumber: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             // MediaRemote Testing
@@ -193,6 +202,33 @@ struct DebugSettingsView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+            }
+            .padding()
+            .background(Color.white.opacity(0.05))
+            .cornerRadius(12)
+
+            Divider()
+
+            // App Version / Build (метка времени сборки — видно, что это свежий бинарь)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.teal)
+                        .font(.title2)
+                    Text("Версия")
+                        .font(.headline)
+                    Spacer()
+                }
+
+                HStack(spacing: 6) {
+                    Text("PushToTalk \(appVersion)")
+                        .font(.callout)
+                    Text("(build \(buildNumber))")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                    Spacer()
+                }
             }
             .padding()
             .background(Color.white.opacity(0.05))
