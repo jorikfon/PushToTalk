@@ -7,9 +7,8 @@ public class SilenceDetector {
     public static let shared = SilenceDetector()
 
     // Пороговые значения
-    /// Граница тишина/речь. Публичный — единый источник истины: тем же порогом
-    /// reuse-логика проверяет хвост, чтобы быть не менее строгой, чем финальная
-    /// детекция речи (иначе тихое последнее слово было бы отброшено).
+    /// Граница тишина/речь. Публичный — единый источник истины: от него детектор
+    /// пауз в AudioCaptureService производит свои пороги входа/выхода речи.
     public let rmsThreshold: Float = 0.002  // Минимальный RMS для "не тишины"
     private let minSpeechDuration: Float = 0.3  // Минимальная длительность речи (секунды)
 
@@ -48,25 +47,6 @@ public class SilenceDetector {
 
         LogManager.audio.success("SilenceDetector: ✓ Обнаружен звук", details: "RMS=\(String(format: "%.4f", rms)), duration=\(String(format: "%.2f", duration))s")
         return false
-    }
-
-    /// Проверяет, что ВЕСЬ отрезок — тишина, по непересекающимся окнам.
-    /// Одиночное усреднённое RMS прячет короткое слово в длинной тишине; оконная
-    /// проверка ловит любое окно с энергией. Используется для анализа коротких
-    /// хвостов (где `isSilence` из-за minSpeechDuration ложно вернул бы true).
-    /// Пустой отрезок считается тишиной.
-    public func isContinuousSilence(_ samples: [Float], windowSeconds: Float = 0.1, rmsThreshold: Float) -> Bool {
-        guard !samples.isEmpty else { return true }
-        let windowSize = max(1, Int(windowSeconds * 16000))
-        var index = 0
-        while index < samples.count {
-            let end = min(index + windowSize, samples.count)
-            if calculateRMS(Array(samples[index..<end])) >= rmsThreshold {
-                return false
-            }
-            index = end
-        }
-        return true
     }
 
     /// Вычисление RMS (Root Mean Square) для аудио сигнала
