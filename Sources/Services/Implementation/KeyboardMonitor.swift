@@ -161,11 +161,13 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
                         }
                     } else if ctx.isPressed {
                         ctx.isPressed = false
+                        // Shift зажат (и он не часть самой комбинации) → режим "отправить".
+                        let submit = event.flags.contains(.maskShift) && !ctx.modifiers.contains(.maskShift)
                         DispatchQueue.main.async {
                             ctx.monitor?.isHotkeyPressed = false
-                            ctx.monitor?.eventContinuation?.yield(.released)
+                            ctx.monitor?.eventContinuation?.yield(.released(submit: submit))
                             ctx.monitor?.onHotkeyRelease?()
-                            LogManager.keyboard.info("Горячая клавиша (fn) отпущена")
+                            LogManager.keyboard.info("Горячая клавиша (fn) отпущена\(submit ? " + Shift → отправка" : "")")
                         }
                     }
                     return Unmanaged.passRetained(event) // не поглощаем fn (см. System Settings → 🌐 → Do Nothing)
@@ -185,11 +187,13 @@ public class KeyboardMonitor: KeyboardMonitorProtocol, ObservableObject {
                     return nil // Поглощаем все keyDown (включая повторы при удержании)
                 } else if type == .keyUp && ctx.isPressed {
                     ctx.isPressed = false
+                    // Shift зажат (и он не часть самой комбинации) → режим "отправить".
+                    let submit = event.flags.contains(.maskShift) && !ctx.modifiers.contains(.maskShift)
                     DispatchQueue.main.async {
                         ctx.monitor?.isHotkeyPressed = false
-                        ctx.monitor?.eventContinuation?.yield(.released)
+                        ctx.monitor?.eventContinuation?.yield(.released(submit: submit))
                         ctx.monitor?.onHotkeyRelease?()
-                        LogManager.keyboard.info("Горячая клавиша отпущена: \(ctx.keyCode.displayName)")
+                        LogManager.keyboard.info("Горячая клавиша отпущена: \(ctx.keyCode.displayName)\(submit ? " + Shift → отправка" : "")")
                     }
                     return nil // Поглощаем событие
                 }

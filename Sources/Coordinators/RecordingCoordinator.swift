@@ -132,7 +132,7 @@ public final class RecordingCoordinator {
 
     /// Остановить запись и выполнить транскрипцию
     /// Вызывается при отпускании hotkey или из UI
-    public func stopRecording() {
+    public func stopRecording(submitAfterInsert: Bool = false) {
         guard isRecording else {
             LogManager.app.info("⏭️ Запись не идет, пропускаем stopRecording()")
             return
@@ -174,7 +174,7 @@ public final class RecordingCoordinator {
                 }
             }
 
-            await performTranscription(audioData: audioData, finalizingSession: finalizingSession)
+            await performTranscription(audioData: audioData, finalizingSession: finalizingSession, submitAfterInsert: submitAfterInsert)
         }
     }
 
@@ -344,7 +344,7 @@ public final class RecordingCoordinator {
     // MARK: - Private Methods - Transcription
 
     /// Выполнение финальной транскрипции и вставка текста
-    private func performTranscription(audioData: [Float], finalizingSession: Int) async {
+    private func performTranscription(audioData: [Float], finalizingSession: Int, submitAfterInsert: Bool) async {
         let startTime = Date()
 
         // Проверка на тишину
@@ -399,7 +399,7 @@ public final class RecordingCoordinator {
 
         // Обработка результата
         if !transcription.isEmpty {
-            await handleSuccessfulTranscription(transcription, duration: duration)
+            await handleSuccessfulTranscription(transcription, duration: duration, submitAfterInsert: submitAfterInsert)
         } else {
             await handleEmptyTranscription()
         }
@@ -441,10 +441,10 @@ public final class RecordingCoordinator {
     }
 
     /// Обработка успешной транскрипции
-    private func handleSuccessfulTranscription(_ text: String, duration: TimeInterval) async {
+    private func handleSuccessfulTranscription(_ text: String, duration: TimeInterval, submitAfterInsert: Bool) async {
         LogManager.transcription.success(
             "Транскрипция завершена",
-            details: "\"\(text)\" (за \(String(format: "%.1f", duration))с)"
+            details: "\"\(text)\" (за \(String(format: "%.1f", duration))с)\(submitAfterInsert ? " + Enter" : "")"
         )
 
         await MainActor.run {
@@ -452,8 +452,8 @@ public final class RecordingCoordinator {
             hideProcessingState()
             audioFeedbackManager.playSuccessSound()
 
-            // Вставка текста
-            textInserter.insertTextAtCursor(text)
+            // Вставка текста (+ Enter, если режим отправки — был зажат Shift)
+            textInserter.insertTextAtCursor(text, pressReturnAfter: submitAfterInsert)
 
             // Добавление в историю
             transcriptionHistory.addTranscription(text, duration: duration)

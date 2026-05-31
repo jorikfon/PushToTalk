@@ -9,6 +9,7 @@ public final class MockTextInserter: TextInserterProtocol {
     public var insertTextCallCount = 0
     public var insertedTexts: [String] = []
     public var lastInsertedText: String?
+    public var lastPressedReturn = false
 
     // MARK: - Mock Behavior Configuration
 
@@ -21,10 +22,11 @@ public final class MockTextInserter: TextInserterProtocol {
 
     // MARK: - TextInserterProtocol
 
-    public func insertTextAtCursor(_ text: String) {
+    public func insertTextAtCursor(_ text: String, pressReturnAfter: Bool) {
         insertTextCallCount += 1
         insertedTexts.append(text)
         lastInsertedText = text
+        lastPressedReturn = pressReturnAfter
 
         // Simulate insertion delay if configured
         if shouldSimulateDelay {

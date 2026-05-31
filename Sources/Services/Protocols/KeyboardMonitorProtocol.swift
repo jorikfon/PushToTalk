@@ -4,7 +4,9 @@ import Combine
 /// Событие горячей клавиши
 public enum HotkeyEvent: Sendable {
     case pressed
-    case released
+    /// Отпускание. submit = в момент отпускания был зажат Shift (и Shift не входит
+    /// в саму комбинацию хоткея) → после вставки нужно нажать Enter (отправка в чат).
+    case released(submit: Bool)
 }
 
 /// Протокол мониторинга глобальных горячих клавиш

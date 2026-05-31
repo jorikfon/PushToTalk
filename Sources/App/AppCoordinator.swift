@@ -147,8 +147,8 @@ public final class AppCoordinator {
                 switch event {
                 case .pressed:
                     recordingCoordinator.startRecording()
-                case .released:
-                    recordingCoordinator.stopRecording()
+                case .released(let submit):
+                    recordingCoordinator.stopRecording(submitAfterInsert: submit)
                 }
             }
         }
