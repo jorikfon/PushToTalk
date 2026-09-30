@@ -238,11 +238,11 @@ public final class AppCoordinator {
             // моделью из настроек (иначе после перезапуска всегда грузилась бы small).
             var modelToLoad = container.modelManager.currentModel
 
-            // Кастомная модель должна быть заранее скачана. Если файлов нет —
+            // Кастомная модель и Parakeet должны быть заранее скачаны. Если файлов нет —
             // откатываемся на small, чтобы не падать на старте.
-            if AppConstants.CustomModels.isCustom(modelToLoad),
+            if (AppConstants.CustomModels.isCustom(modelToLoad) || AppConstants.CustomModels.isParakeet(modelToLoad)),
                await !container.modelManager.checkModelAvailability(modelToLoad) {
-                LogManager.app.info("Кастомная модель \(modelToLoad) не скачана — загружаем small")
+                LogManager.app.info("Модель \(modelToLoad) не скачана — загружаем small")
                 modelToLoad = "small"
                 container.modelManager.saveCurrentModel("small")
             }

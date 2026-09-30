@@ -8,6 +8,7 @@
 
 import Foundation
 import WhisperKit
+import FluidAudio
 
 public class ModelManager: ModelManagerProtocol, ObservableObject {
 
@@ -42,13 +43,16 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
         WhisperModel(name: "large-v3", displayName: "Large V3", size: "~3 GB", speed: "Slower", accuracy: "Best"),
         // Кастомная модель Hugging Face (large-v3-turbo, дообучен на русский).
         // Загружается через modelFolder:, см. AppConstants.CustomModels.
-        WhisperModel(name: AppConstants.CustomModels.podlodkaName, displayName: "Podlodka Turbo (RU)", size: "~1.6 GB", speed: "Medium", accuracy: "Best (RU)")
+        WhisperModel(name: AppConstants.CustomModels.podlodkaName, displayName: "Podlodka Turbo (RU)", size: "~1.6 GB", speed: "Medium", accuracy: "Best (RU)"),
+        // NVIDIA Parakeet TDT 0.6B v3 — отдельный движок (FluidAudio, CoreML/ANE).
+        // 25 европейских языков с автодетектом, русский WER 7.2% (FLEURS).
+        WhisperModel(name: AppConstants.CustomModels.parakeetName, displayName: "Parakeet v3", size: "~470 MB", speed: "Very Fast (RTFx 100+)", accuracy: "Excellent (RU+EN)")
     ]
 
     // MARK: - Private Properties
 
     private let modelDirectory: URL
-    private let userDefaultsKey = "currentWhisperModel"
+    private let userDefaultsKey = AppConstants.UserDefaultsKeys.currentWhisperModel
 
     // MARK: - Initialization
 
@@ -114,6 +118,14 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
             return isCustomModelDownloaded(modelName)
         }
 
+        // Parakeet: веса лежат в asr/parakeet-tdt-0.6b-v3/ (FluidAudio)
+        if AppConstants.CustomModels.isParakeet(modelName) {
+            return AsrModels.modelsExist(
+                at: AppConstants.CustomModels.parakeetDownloadTarget(),
+                version: .v3
+            )
+        }
+
         do {
             let _ = try await WhisperKit(
                 model: modelName,
@@ -133,6 +145,12 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
         // Кастомные модели скачиваем напрямую из Hugging Face (с реальным прогрессом).
         if AppConstants.CustomModels.isCustom(modelName) {
             try await downloadCustomModel(modelName)
+            return
+        }
+
+        // Parakeet качает FluidAudio — у него есть честный прогресс.
+        if AppConstants.CustomModels.isParakeet(modelName) {
+            try await downloadParakeetModel()
             return
         }
 
@@ -202,6 +220,19 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
             }
             try? FileManager.default.removeItem(at: AppConstants.CustomModels.folder(for: modelName))
             print("ModelManager: ✓ Кастомная модель \(modelName) удалена")
+            return
+        }
+
+        // Parakeet: удаляем всю папку asr (там только его веса).
+        if AppConstants.CustomModels.isParakeet(modelName) {
+            await MainActor.run {
+                self.downloadedModels.removeAll { $0 == modelName }
+            }
+            if currentModel == modelName {
+                saveCurrentModel("small")
+            }
+            try? FileManager.default.removeItem(at: AppConstants.CustomModels.asrDirectory())
+            print("ModelManager: ✓ Модель \(modelName) удалена")
             return
         }
 
@@ -298,6 +329,50 @@ public class ModelManager: ModelManagerProtocol, ObservableObject {
                 downloadError = "Failed to download \(modelName): \(error.localizedDescription)"
             }
             LogManager.app.failure("Загрузка кастомной модели", error: error)
+            throw ModelError.downloadFailed(error)
+        }
+    }
+
+    // MARK: - Parakeet Models
+
+    /// Скачивание весов Parakeet через FluidAudio (реальный прогресс).
+    private func downloadParakeetModel() async throws {
+        await MainActor.run {
+            isDownloading = true
+            downloadingModel = AppConstants.CustomModels.parakeetName
+            downloadProgress = 0.0
+            downloadError = nil
+        }
+
+        LogManager.app.begin("Загрузка модели Parakeet", details: AppConstants.CustomModels.parakeetRepo)
+
+        do {
+            _ = try await AsrModels.download(
+                to: AppConstants.CustomModels.parakeetDownloadTarget(),
+                version: .v3,
+                progressHandler: { [weak self] progress in
+                    Task { @MainActor in
+                        self?.downloadProgress = progress.fractionCompleted
+                    }
+                }
+            )
+
+            await MainActor.run {
+                isDownloading = false
+                downloadingModel = nil
+                downloadProgress = 1.0
+            }
+
+            scanDownloadedModels()
+            LogManager.app.success("Модель Parakeet успешно загружена")
+        } catch {
+            await MainActor.run {
+                isDownloading = false
+                downloadingModel = nil
+                downloadProgress = 0.0
+                downloadError = "Failed to download parakeet-v3: \(error.localizedDescription)"
+            }
+            LogManager.app.failure("Загрузка модели Parakeet", error: error)
             throw ModelError.downloadFailed(error)
         }
     }

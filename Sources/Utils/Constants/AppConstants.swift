@@ -118,6 +118,7 @@ public enum AppConstants {
 
     /// UserDefaults ключи
     public enum UserDefaultsKeys {
+        public static let currentWhisperModel = "currentWhisperModel"
         public static let transcriptionPrompt = "transcriptionPrompt"
         public static let useProgrammingPrompt = "useProgrammingPrompt"
         public static let transcriptionLanguage = "transcriptionLanguage"
@@ -177,6 +178,32 @@ public enum AppConstants {
         /// Является ли модель кастомной (загружается через `modelFolder:`).
         public static func isCustom(_ name: String) -> Bool {
             name == podlodkaName
+        }
+
+        // MARK: Parakeet (FluidAudio, CoreML/ANE)
+
+        /// Внутренний идентификатор модели Parakeet TDT 0.6B v3 (NVIDIA).
+        /// Мультиязычная (25 европейских языков, вкл. русский), загрузка через FluidAudio,
+        /// а не WhisperKit — поэтому живёт в том же перечне моделей, но с отдельным роутингом.
+        public static let parakeetName = "parakeet-v3"
+
+        /// Репозиторий Hugging Face с CoreML-весами Parakeet (используется FluidAudio).
+        public static let parakeetRepo = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+
+        /// Базовая папка для моделей FluidAudio (веса лежат в `asr/<имя репозитория>/`).
+        public static func asrDirectory(in base: URL = modelStorageDirectory) -> URL {
+            base.appendingPathComponent("asr", isDirectory: true)
+        }
+
+        /// Каталог, передаваемый в `AsrModels.downloadAndLoad(to:)`.
+        /// FluidAudio кладёт веса в `parent/<folderName>/`, т.е. в `asr/parakeet-tdt-0.6b-v3/`.
+        public static func parakeetDownloadTarget(in base: URL = modelStorageDirectory) -> URL {
+            asrDirectory(in: base).appendingPathComponent("download", isDirectory: true)
+        }
+
+        /// Является ли модель движком Parakeet (FluidAudio).
+        public static func isParakeet(_ name: String) -> Bool {
+            name == parakeetName
         }
     }
 

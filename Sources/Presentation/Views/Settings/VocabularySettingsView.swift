@@ -12,6 +12,11 @@ struct VocabularySettingsView: View {
         vocabularyView
     }
 
+    /// Активен ли движок Parakeet (у него нет prefill-промптов, язык определяется автоматически)
+    private var parakeetActive: Bool {
+        userSettings.isParakeetEngineActive
+    }
+
     // MARK: - Views
 
     private var vocabularyView: some View {
@@ -34,6 +39,17 @@ struct VocabularySettingsView: View {
                         Text("🇨🇳 中文").tag("zh")
                     }
                     .pickerStyle(.menu)
+
+                    if parakeetActive {
+                        HStack(spacing: 8) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.blue)
+                                .font(.caption)
+                            Text("Parakeet определяет язык сам. Выбранный язык служит только подсказкой для фильтрации символов.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
 
@@ -43,6 +59,17 @@ struct VocabularySettingsView: View {
                     Text("Выберите словари для прогрева модели. Можно выбрать несколько.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    if parakeetActive {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundColor(.orange)
+                                .font(.caption)
+                            Text("Parakeet не использует промпты: эти словари не применяются. Замены из словаря коррекций работают.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
 
                     ForEach(VocabularyDictionariesManager.shared.predefinedDictionaries) { dictionary in
                         Toggle(isOn: Binding(

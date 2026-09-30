@@ -7,6 +7,8 @@ let package = Package(
     dependencies: [
         // WhisperKit для распознавания речи на Apple Silicon
         .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.9.0"),
+        // FluidAudio — NVIDIA Parakeet (CoreML/ANE) как альтернативный движок распознавания
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
         // MediaRemote Private API для управления медиа-плеерами
         .package(url: "https://github.com/PrivateFrameworks/MediaRemote.git", from: "0.1.0")
     ],
@@ -16,6 +18,7 @@ let package = Package(
             name: "PushToTalkCore",
             dependencies: [
                 .product(name: "WhisperKit", package: "WhisperKit"),
+                .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "PrivateMediaRemote", package: "MediaRemote"),
                 .product(name: "MediaRemote", package: "MediaRemote")
             ],
