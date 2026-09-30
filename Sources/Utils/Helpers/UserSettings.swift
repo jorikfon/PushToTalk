@@ -72,6 +72,14 @@ Metal, GPU, CPU, memory, cache, buffer, thread, async, sync, framework, library.
 
     // MARK: - Transcription Prompt
 
+    /// Активен ли движок Parakeet (выбран в качестве текущей модели).
+    /// Не реактивно: читает UserDefaults напрямую — для UI-подсказок достаточно.
+    public var isParakeetEngineActive: Bool {
+        UserDefaults.standard.string(
+            forKey: AppConstants.UserDefaultsKeys.currentWhisperModel
+        ) == AppConstants.CustomModels.parakeetName
+    }
+
     /// Использовать встроенный промпт для программирования
     public var useProgrammingPrompt: Bool {
         get {

@@ -22,9 +22,9 @@ public final class ServiceContainer {
 
     // MARK: - Services
 
-    /// Сервис транскрипции через WhisperKit
+    /// Сервис транскрипции: роутер между WhisperKit и Parakeet (FluidAudio)
     public lazy var whisperService: WhisperServiceProtocol = {
-        WhisperService(
+        TranscriptionServiceRouter(
             downloadBase: AppConstants.modelStorageDirectory,
             vocabularyManager: self.vocabularyManager,
             userSettings: self.userSettings
